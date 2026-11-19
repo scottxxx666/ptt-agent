@@ -25,7 +25,8 @@ def main() -> None:
     if args.post:
         poster = PttPoster(os.environ["PTT_ID"], os.environ["PTT_PW"],
                            board=os.environ.get("PTT_BOARD", "Test"),
-                           title_index=int(os.environ.get("PTT_TITLE_INDEX", "1")))
+                           title_index=int(os.environ.get("PTT_TITLE_INDEX", "1")),
+                           proxy=os.environ.get("PTT_PROXY") or None)
         post = poster.post
     if args.source == "weverse":
         from .weverse import fetch_lives

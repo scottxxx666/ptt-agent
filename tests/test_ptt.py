@@ -1,3 +1,5 @@
+import os
+
 import pytest
 
 from ptt_agent.ptt import PttPoster
@@ -98,3 +100,73 @@ def test_post_invalidates_recent_titles_cache():
     p.post("T", "C")
     p.has_recent_post("261102")
     assert [c[0] for c in api.calls].count("login") == 3
+
+
+class EnvSpyApi(FakeApi):
+    """Records WSS_PROXY as PyPtt would see it at each call."""
+    def __init__(self, fail_post=False):
+        super().__init__(fail_post)
+        self.seen = []
+
+    def login(self, **kw):
+        self.seen.append(os.environ.get("WSS_PROXY"))
+
+    def post(self, **kw):
+        self.seen.append(os.environ.get("WSS_PROXY"))
+        if self.fail_post:
+            raise RuntimeError("boom")
+
+    def logout(self):
+        self.seen.append(os.environ.get("WSS_PROXY"))
+
+
+PROXY = "socks5h://127.0.0.1:40000"
+
+
+def test_proxy_is_set_only_while_talking_to_ptt(monkeypatch):
+    monkeypatch.delenv("WSS_PROXY", raising=False)
+    api = EnvSpyApi()
+    PttPoster("id", "pw", "Test", 1, api_factory=lambda: api, proxy=PROXY).post("T", "C")
+    assert api.seen == [PROXY, PROXY, PROXY]
+    assert "WSS_PROXY" not in os.environ
+
+
+def test_proxy_covers_recent_titles_and_is_removed_when_it_fails(monkeypatch):
+    monkeypatch.delenv("WSS_PROXY", raising=False)
+    api = EnvSpyApi(fail_post=True)
+    p = PttPoster("id", "pw", "Test", 1, api_factory=lambda: api, proxy=PROXY)
+    with pytest.raises(RuntimeError):
+        p.post("T", "C")
+    assert "WSS_PROXY" not in os.environ
+
+    class Empty(SearchApi, EnvSpyApi):
+        pass
+    api = Empty([])
+    PttPoster("me", "pw", "Test", 1, api_factory=lambda: api, proxy=PROXY).recent_titles()
+    assert api.seen and set(api.seen) == {PROXY} and "WSS_PROXY" not in os.environ
+
+
+def test_proxy_restores_a_preexisting_value(monkeypatch):
+    monkeypatch.setenv("WSS_PROXY", "socks5h://other:1")
+    PttPoster("id", "pw", "Test", 1, api_factory=EnvSpyApi, proxy=PROXY).post("T", "C")
+    assert os.environ["WSS_PROXY"] == "socks5h://other:1"
+
+
+def test_no_proxy_leaves_the_environment_alone(monkeypatch):
+    monkeypatch.setenv("WSS_PROXY", "socks5h://other:1")
+    api = EnvSpyApi()
+    PttPoster("id", "pw", "Test", 1, api_factory=lambda: api).post("T", "C")
+    assert api.seen == ["socks5h://other:1"] * 3
+
+
+def test_websockets_picks_wss_proxy_for_ptt_but_not_https_proxy_alone(monkeypatch):
+    """The reason WSS_PROXY is used: it is what websockets reads first for wss://."""
+    from websockets.proxy import get_proxy
+    from websockets.uri import parse_uri
+    for k in ("WSS_PROXY", "wss_proxy", "HTTPS_PROXY", "https_proxy", "ALL_PROXY", "all_proxy",
+              "NO_PROXY", "no_proxy"):
+        monkeypatch.delenv(k, raising=False)
+    uri = parse_uri("wss://ws.ptt.cc/bbs")
+    assert get_proxy(uri) is None
+    monkeypatch.setenv("WSS_PROXY", PROXY)
+    assert get_proxy(uri) == PROXY

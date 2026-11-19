@@ -8,7 +8,7 @@ def run_cli(monkeypatch, argv, env=()):
     monkeypatch.setattr(cli, "load_dotenv", lambda *a, **k: None)
     monkeypatch.setattr(cli, "run", lambda **kw: captured.update(kw))
     monkeypatch.setattr(cli, "PttPoster", lambda *a, **kw: captured.setdefault("poster", (a, kw)) and type("P", (), {"post": None})())
-    for k in ("STATE_PATH", "PTT_BOARD", "PTT_TITLE_INDEX"):
+    for k in ("STATE_PATH", "PTT_BOARD", "PTT_TITLE_INDEX", "PTT_PROXY"):
         monkeypatch.delenv(k, raising=False)
     monkeypatch.setenv("PTT_ID", "id")
     monkeypatch.setenv("PTT_PW", "pw")
@@ -61,3 +61,12 @@ def test_crash_notifies_and_reraises_only_when_posting(monkeypatch):
         with pytest.raises(RuntimeError):
             cli.main()
         assert len(msgs) == expected and all("session expired" in m for m in msgs)
+
+
+def test_proxy_defaults_to_none_and_comes_from_ptt_proxy(monkeypatch):
+    _, kw = run_cli(monkeypatch, ["--post"])["poster"]
+    assert kw["proxy"] is None
+    _, kw = run_cli(monkeypatch, ["--post"], env=[("PTT_PROXY", "socks5h://127.0.0.1:40000")])["poster"]
+    assert kw["proxy"] == "socks5h://127.0.0.1:40000"
+    _, kw = run_cli(monkeypatch, ["--post"], env=[("PTT_PROXY", "")])["poster"]
+    assert kw["proxy"] is None
