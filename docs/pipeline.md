@@ -3,7 +3,7 @@
 - Feed: playlist `UULF…` RSS = long-form only (Shorts excluded). No API key.
 - Translator: runs `agy -p "/ls <title>" --output-format json` with cwd = project root, because the skill is `.agents/skills/le-sserafim-translator/SKILL.md`. Output is double JSON: agy envelope → `response` string → `{"title_zh", "title_original"}`. Changing the skill's output format breaks `translator.py`.
 - State: `state.json` (seen video ids). A missing file means first run: seed everything as seen, post nothing. A video is marked seen only after it was posted.
-- PyPtt needs Python >= 3.11 and a non-cloud IP (PTT blocks cloud IPs), so run it on a local machine.
+- PyPtt needs Python >= 3.11 and a non-cloud IP (PTT blocks cloud IPs). Locally this is automatic; on a cloud VM set `PTT_PROXY=socks5h://127.0.0.1:40000` (WARP proxy mode). `PttPoster(proxy=...)` sets `WSS_PROXY` only while PyPtt logs in/posts/logs out: `websockets` reads it first for wss://, while urllib (YouTube, Telegram) and `agy` ignore it. Needs `python-socks`.
 - Hand-post guard (`--post` only): before translating, `PttPoster.has_recent_post` searches the board for this account's last 10 posts (PyPtt author search). A title containing the key (YouTube: `YYMMDD`; Weverse: the full title) means it was posted by hand, so the item is marked seen and skipped. Same-day videos therefore collide on YouTube. If the check itself fails, the item retries next run. Real-board behaviour of the search is unverified; try it on `Test` first.
 - Translation failure: `pipeline` retries `agy` twice (3 attempts); if all fail the item is logged and marked seen (skipped for good, not in dry-run). Post failures are not marked and retry next run. `agy` can take ~2 min for odd titles, hence `translate_title` timeout 420s.
 

@@ -60,3 +60,55 @@ uv run pytest
 帳密放在 `.env`（參考 `.env.example`）：`PTT_ID`、`PTT_PW`。
 
 更多實作細節與限制見 `CLAUDE.md`。
+
+## Linux（GCP VM，systemd）
+
+`deploy/` 是 Linux 版排程，只跑 YouTube（Weverse 還沒搬）。VM 端（WARP、機器設定）在 `gcp-free-agents` repo 的 `scripts/startup.sh`。PTT 擋雲端 IP，所以 unit 設了 `PTT_PROXY=socks5h://127.0.0.1:40000`（WARP proxy 模式），只有 PyPtt 的 websocket 會走它。
+
+翻譯用的 `agy` 用你的 Google 帳號（Gemini Pro）登入，不用 API key。登入 token 存在 OS keyring（Linux Secret Service/dbus），而 VM 沒有桌面，所以 `deploy/with-keyring.sh` 每次執行時開一個私有 D-Bus session，並用**空密碼**解鎖 `gnome-keyring`，token 存在 `/opt/ptt-agent/.local/share/keyrings/`。代價：能讀 `ptt-agent` 家目錄的人就能讀到 token，所以 user 要專用。這是社群在 headless 環境的做法，官方文件沒有說明 Linux 無 keyring 時的行為，**我沒有驗證過**；官方的 headless 替代方案是 API key 或 ADC。
+
+在 VM 上（Debian 12）：
+
+```bash
+# 1. uv（系統層級，unit 的 ExecStart 用 /usr/local/bin/uv）
+curl -LsSf https://astral.sh/uv/install.sh | sudo env UV_INSTALL_DIR=/usr/local/bin UV_NO_MODIFY_PATH=1 sh
+
+# 2. 專用 user 與程式碼
+sudo useradd --system --create-home --home-dir /opt/ptt-agent --shell /bin/bash ptt-agent
+sudo -u ptt-agent git clone <repo> /opt/ptt-agent/app
+sudo -u ptt-agent bash -c 'cd /opt/ptt-agent/app && uv sync --frozen --python 3.13'
+
+# 3. keyring 套件與 agy（裝到 /opt/ptt-agent/.local/bin/agy）
+sudo apt-get install -y dbus gnome-keyring libsecret-1-0
+sudo -u ptt-agent bash -c 'curl -fsSL https://antigravity.google/cli/install.sh | bash'
+
+# 4. secrets（填 PTT_ID PTT_PW TELEGRAM_*）
+sudo install -m 0600 -o root -g root /opt/ptt-agent/app/deploy/ptt-agent.env.example /etc/ptt-agent.env
+sudoedit /etc/ptt-agent.env
+
+# 5. unit
+sudo cp /opt/ptt-agent/app/deploy/ptt-agent.{service,timer} /etc/systemd/system/
+sudo systemctl daemon-reload
+```
+
+先手動測。下面的 `EXEC` 用 systemd-run 載入同一份 `EnvironmentFile` 和 keyring 包裝；沒有設 `PTT_BOARD`/`STATE_PATH`，所以是 `Test` 看板和 `state.dev.json`，不會動正式：
+
+```bash
+EXEC='sudo systemd-run --pty --wait --collect -p User=ptt-agent -p WorkingDirectory=/opt/ptt-agent/app \
+  -p RuntimeDirectory=ptt-agent -p Environment=XDG_RUNTIME_DIR=/run/ptt-agent \
+  -p EnvironmentFile=/etc/ptt-agent.env -p Environment=PATH=/opt/ptt-agent/.local/bin:/usr/local/bin:/usr/bin:/bin'
+KR=/opt/ptt-agent/app/deploy/with-keyring.sh
+
+# a. 第一次登入：agy 會印出網址，用別台電腦的瀏覽器登入 Google，把顯示的授權碼貼回來，然後 /exit
+eval "$EXEC" $KR agy
+# b. 登入有沒有留住：再跑一次，不應該再問登入
+eval "$EXEC" $KR agy -p '"/ls test"' --output-format json
+# c. 乾跑：翻譯但不發文
+eval "$EXEC" $KR uv run --frozen python -m ptt_agent
+# d. 發到 Test 看板（經 WARP）
+eval "$EXEC" -p Environment=PTT_PROXY=socks5h://127.0.0.1:40000 $KR uv run --frozen python -m ptt_agent --post
+```
+
+登入過期時（log 或 Telegram 出現翻譯失敗），重跑 a。
+
+啟用前（**會發到正式看板**）：先停 Mac 的 launchd（`launchctl bootout gui/$(id -u)/com.ptt-agent`）、把 Mac 的 `state.json` 複製到 `/opt/ptt-agent/state.json`（`chown ptt-agent`），再 `sudo systemctl enable --now ptt-agent.timer`。Mac 和 VM 不可同時啟用。

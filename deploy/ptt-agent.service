@@ -1,0 +1,32 @@
+[Unit]
+Description=ptt-agent: post new LE SSERAFIM YouTube videos to PTT
+After=network-online.target warp-svc.service
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+User=ptt-agent
+Group=ptt-agent
+WorkingDirectory=/opt/ptt-agent/app
+# Secrets only (PTT_ID, PTT_PW, TELEGRAM_*); root:root 0600. Never put PTT_BOARD here.
+EnvironmentFile=/etc/ptt-agent.env
+# Live values live in the unit, like the launchd plist on the Mac; manual runs default to Test.
+Environment=PTT_BOARD=LE_SSERAFIM
+Environment=PTT_TITLE_INDEX=1
+Environment=STATE_PATH=/opt/ptt-agent/state.json
+# WARP proxy mode (installed by gcp-free-agents scripts/startup.sh); only PyPtt's websocket uses it.
+Environment=PTT_PROXY=socks5h://127.0.0.1:40000
+RuntimeDirectory=ptt-agent
+Environment=XDG_RUNTIME_DIR=/run/ptt-agent
+Environment=PATH=/opt/ptt-agent/.local/bin:/usr/local/bin:/usr/bin:/bin
+# with-keyring.sh gives agy a keyring for its Google login (see README).
+ExecStart=/opt/ptt-agent/app/deploy/with-keyring.sh /usr/local/bin/uv run --frozen python -m ptt_agent --post
+# agy can take ~2 min per title and is retried; keep above translator timeout x attempts.
+TimeoutStartSec=30min
+MemoryMax=500M
+
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/opt/ptt-agent
