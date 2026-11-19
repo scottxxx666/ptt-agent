@@ -6,6 +6,7 @@ from pathlib import Path
 from dotenv import load_dotenv
 
 from .formatter import build_weverse_title, weverse_dup_key, youtube_dup_key
+from .notifier import notify
 from .pipeline import run
 from .ptt import PttPoster
 from .translator import PROJECT_ROOT, translate_title
@@ -36,9 +37,14 @@ def main() -> None:
         dup_key = youtube_dup_key
         default_state = "state.dev.json"
     already_posted = (lambda item: poster.has_recent_post(dup_key(item))) if poster else None
-    run(translate=translate_title, post=post, already_posted=already_posted,
-        state_path=Path(os.environ.get("STATE_PATH", PROJECT_ROOT / default_state)),
-        do_post=args.post, **extra)
+    try:
+        run(translate=translate_title, post=post, already_posted=already_posted,
+            state_path=Path(os.environ.get("STATE_PATH", PROJECT_ROOT / default_state)),
+            do_post=args.post, notify=notify if args.post else None, **extra)
+    except Exception as e:
+        if args.post:
+            notify(f"[ptt-agent:{args.source}] crashed: {type(e).__name__}: {e}")
+        raise
 
 
 if __name__ == "__main__":

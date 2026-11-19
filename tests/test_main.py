@@ -44,3 +44,20 @@ def test_weverse_source_uses_its_own_default_state_and_builder(monkeypatch):
     assert c["state_path"].name == "state.weverse.dev.json"
     assert c["make_title"].__name__ == "build_weverse_title"
     assert c["do_post"] is False
+
+
+def test_crash_notifies_and_reraises_only_when_posting(monkeypatch):
+    import pytest
+    msgs = []
+    monkeypatch.setattr(cli, "notify", msgs.append)
+
+    def boom(**kw):
+        raise RuntimeError("session expired")
+    for argv, expected in ((["--post"], 1), ([], 0)):
+        msgs.clear()
+        run_cli(monkeypatch, [])  # sets up env/stubs
+        monkeypatch.setattr(cli, "run", boom)
+        monkeypatch.setattr(sys, "argv", ["ptt_agent", *argv])
+        with pytest.raises(RuntimeError):
+            cli.main()
+        assert len(msgs) == expected and all("session expired" in m for m in msgs)

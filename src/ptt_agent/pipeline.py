@@ -21,12 +21,13 @@ def _translate_with_retry(translate, title: str):
 
 
 def run(*, fetch, translate, post, state_path: Path, do_post: bool,
-        make_title=build_title, make_content=build_content, already_posted=None) -> int:
+        make_title=build_title, make_content=build_content, already_posted=None, notify=None) -> int:
     """Translate and post unseen items oldest-first. Returns the number posted.
 
     already_posted(item) -> bool is asked before translating; True means it was posted by hand,
     so the item is marked seen and skipped. If the check itself fails the item retries next run.
     """
+    notify = notify or (lambda text: None)
     videos = fetch()
     seen = load_seen(state_path)
     if seen is None:
@@ -41,6 +42,7 @@ def run(*, fetch, translate, post, state_path: Path, do_post: bool,
                 duplicate = already_posted(video)
             except Exception:
                 log.exception("duplicate check failed for %s, will retry next run", video.id)
+                notify(f"[ptt-agent] duplicate check failed for {video.id}, retrying next run")
                 continue
             if duplicate:
                 log.info("%s is already on the board, marking as seen", video.id)
@@ -51,6 +53,8 @@ def run(*, fetch, translate, post, state_path: Path, do_post: bool,
             translation = _translate_with_retry(translate, video.title)
         except TranslationError:
             log.exception("giving up on %s after %d attempts", video.id, TRANSLATE_RETRIES + 1)
+            if do_post:
+                notify(f"[ptt-agent] translation failed, skipped for good: {video.id} {video.title}")
             if do_post:  # skipped for good, otherwise it would burn agy time on every run
                 seen.add(video.id)
                 save_seen(state_path, seen)
@@ -63,6 +67,7 @@ def run(*, fetch, translate, post, state_path: Path, do_post: bool,
             post(title, content)
         except Exception:
             log.exception("skipping %s, will retry next run", video.id)
+            notify(f"[ptt-agent] post failed for {video.id}, retrying next run")
             continue
         seen.add(video.id)
         save_seen(state_path, seen)

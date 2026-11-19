@@ -139,3 +139,30 @@ def test_dry_run_skips_duplicate_check(tmp_path, make_video):
         raise AssertionError("must not log in during dry-run")
     run(fetch=lambda: [make_video("a")], translate=translate_ok, post=None, state_path=state,
         do_post=False, already_posted=boom)
+
+
+def test_notifies_on_translation_giveup_and_post_failure_only_when_posting(tmp_path, make_video):
+    def bad(title):
+        raise TranslationError("agy timeout")
+    msgs, state = [], tmp_path / "s.json"
+    save_seen(state, set())
+    run(fetch=lambda: [make_video("a")], translate=bad, post=Recorder(), state_path=state,
+        do_post=True, notify=msgs.append)
+    assert len(msgs) == 1 and "translation failed" in msgs[0] and "a" in msgs[0]
+
+    msgs.clear()
+    save_seen(state, set())
+    run(fetch=lambda: [make_video("b", "x")], translate=translate_ok, post=Recorder(fail_on=("youtu.be/b",)),
+        state_path=state, do_post=True, notify=msgs.append)
+    assert len(msgs) == 1 and "post failed" in msgs[0]
+
+
+def test_notifies_when_duplicate_check_fails(tmp_path, make_video):
+    msgs, state = [], tmp_path / "s.json"
+    save_seen(state, set())
+
+    def broken(item):
+        raise RuntimeError("search failed")
+    run(fetch=lambda: [make_video("a")], translate=translate_ok, post=Recorder(), state_path=state,
+        do_post=True, already_posted=broken, notify=msgs.append)
+    assert len(msgs) == 1 and "duplicate check failed" in msgs[0]
