@@ -36,10 +36,15 @@ def translate_title(title: str, run=subprocess.run, timeout: int = 420) -> Trans
         envelope = json.loads(proc.stdout)
     except json.JSONDecodeError as e:
         raise TranslationError(f"agy output is not JSON: {proc.stdout[:200]!r}") from e
+    if not isinstance(envelope, dict):
+        raise TranslationError(f"agy output is not a JSON object: {proc.stdout[:200]!r}")
     if envelope.get("status") != "SUCCESS":
         raise TranslationError(f"agy status {envelope.get('status')}: {envelope.get('error')}")
 
-    response = envelope.get("response", "").strip()
+    response = envelope.get("response")
+    if not isinstance(response, str):
+        raise TranslationError(f"agy response is not a string: {response!r}")
+    response = response.strip()
     fenced = _FENCE.match(response)
     if fenced:
         response = fenced.group(1)

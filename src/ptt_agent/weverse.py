@@ -34,6 +34,13 @@ def profile_dir() -> Path:
 
 
 def parse_lives(payload: dict) -> list[Live]:
+    try:
+        return _parse_lives(payload)
+    except (KeyError, TypeError, AttributeError, ValueError) as e:
+        raise WeverseError(f"unexpected live list payload ({type(e).__name__}: {e})") from e
+
+
+def _parse_lives(payload: dict) -> list[Live]:
     lives = []
     for post in payload["data"]:
         author = post["author"]
@@ -56,7 +63,7 @@ def fetch_lives(timeout_ms: int = 30_000) -> list[Live]:
     with sync_playwright() as p:
         ctx = p.chromium.launch_persistent_context(str(profile_dir()), channel="chrome", headless=True)
         try:
-            page = ctx.pages[0]
+            page = ctx.pages[0] if ctx.pages else ctx.new_page()
             try:
                 with page.expect_response(lambda r: r.url.split("?")[0].endswith(_LIVE_LIST_SUFFIX),
                                           timeout=timeout_ms) as info:

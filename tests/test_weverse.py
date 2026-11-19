@@ -58,3 +58,9 @@ def test_all_member_names_are_big5_encodable():
     import PyPtt  # noqa: F401  (registers big5uao)
     for name in MEMBER_ZH.values():
         name.encode("big5uao")
+
+
+@pytest.mark.parametrize("payload", [{}, {"data": [{"postId": "1"}]}, {"data": None}, {"data": [None]}])
+def test_malformed_payload_raises_weverse_error(payload):
+    with pytest.raises(WeverseError):
+        parse_lives(payload)

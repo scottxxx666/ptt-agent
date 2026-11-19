@@ -1,7 +1,7 @@
 import logging
 from pathlib import Path
 
-from .formatter import build_content, build_title
+from .formatter import UnknownMemberError, build_content, build_title
 from .state import load_seen, save_seen
 from .translator import TranslationError
 
@@ -40,12 +40,17 @@ def run(*, fetch, translate, post, state_path: Path, do_post: bool,
         if do_post and already_posted:
             try:
                 duplicate = already_posted(video)
+            except UnknownMemberError as e:
+                log.error("skipping %s: %s", video.id, e)
+                notify(f"[ptt-agent] {e}; skipping {video.id} until it is added")
+                continue
             except Exception:
                 log.exception("duplicate check failed for %s, will retry next run", video.id)
                 notify(f"[ptt-agent] duplicate check failed for {video.id}, retrying next run")
                 continue
             if duplicate:
                 log.info("%s is already on the board, marking as seen", video.id)
+                notify(f"[ptt-agent] {video.id} looks already posted (same dup key), marked seen without posting")
                 seen.add(video.id)
                 save_seen(state_path, seen)
                 continue
@@ -53,9 +58,8 @@ def run(*, fetch, translate, post, state_path: Path, do_post: bool,
             translation = _translate_with_retry(translate, video.title)
         except TranslationError:
             log.exception("giving up on %s after %d attempts", video.id, TRANSLATE_RETRIES + 1)
-            if do_post:
-                notify(f"[ptt-agent] translation failed, skipped for good: {video.id} {video.title}")
             if do_post:  # skipped for good, otherwise it would burn agy time on every run
+                notify(f"[ptt-agent] translation failed, skipped for good: {video.id} {video.title}")
                 seen.add(video.id)
                 save_seen(state_path, seen)
             continue

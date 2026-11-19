@@ -76,3 +76,25 @@ def test_has_recent_post_matches_key_inside_title():
     p = poster(SearchApi(["[影音] 261102 手動發的"]))
     assert p.has_recent_post("261102") is True
     assert poster(SearchApi(["[影音] 261102 手動發的"])).has_recent_post("261103") is False
+
+
+def test_logout_failure_after_successful_post_does_not_fail_the_post():
+    api = FakeApi()
+    api.logout = lambda: (_ for _ in ()).throw(RuntimeError("logout boom"))
+    PttPoster("id", "pw", "Test", 1, api_factory=lambda: api).post("T", "C")
+
+
+def test_has_recent_post_logs_in_once_for_many_items():
+    api = SearchApi(["[影音] 261102 a"])
+    p = poster(api)
+    p.has_recent_post("261101"), p.has_recent_post("261102"), p.has_recent_post("261103")
+    assert [c[0] for c in api.calls].count("login") == 1
+
+
+def test_post_invalidates_recent_titles_cache():
+    api = SearchApi(["[影音] 261102 a"])
+    p = poster(api)
+    p.has_recent_post("261102")
+    p.post("T", "C")
+    p.has_recent_post("261102")
+    assert [c[0] for c in api.calls].count("login") == 3

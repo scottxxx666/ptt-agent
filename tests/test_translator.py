@@ -45,6 +45,9 @@ def test_tolerates_code_fence():
     envelope('{"title_zh": "   "}'),
     envelope('{"title_zh": 123}'),
     envelope("[1, 2]"),
+    '{"status": "SUCCESS", "response": null}',
+    '{"status": "SUCCESS"}',
+    '["not", "an", "object"]',
 ])
 def test_bad_outputs_raise(out):
     with pytest.raises(TranslationError):

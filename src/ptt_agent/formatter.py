@@ -59,13 +59,17 @@ MEMBER_ZH = {
 }
 
 
+class UnknownMemberError(ValueError):
+    pass
+
+
 def build_weverse_title(live, translation: Translation) -> str:
     """"YYMMDD weverse live <member>"; the official group account has no member suffix."""
     date = live.published.astimezone(_TAIPEI).strftime("%y%m%d")
     title = f"{date} weverse live"
     if live.author is not None:
         if live.author not in MEMBER_ZH:
-            raise ValueError(f"unknown Weverse member {live.author!r}; add it to MEMBER_ZH")
+            raise UnknownMemberError(f"unknown Weverse member {live.author!r}; add it to MEMBER_ZH")
         title += f" {MEMBER_ZH[live.author]}"
     return _fit_bytes(to_big5(title), MAX_TITLE_BYTES)
 

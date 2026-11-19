@@ -1,3 +1,5 @@
+import pytest
+
 from ptt_agent.youtube import FEED_URL, parse_feed
 
 FEED = """<?xml version="1.0" encoding="UTF-8"?>
@@ -32,3 +34,11 @@ def test_parse_empty_feed():
 
 def test_feed_url_is_long_form_only_playlist():
     assert "playlist_id=UULFs-QBT4qkj_YiQw1ZntDO3g" in FEED_URL
+
+
+@pytest.mark.parametrize("title_xml", ["", "<title></title>", "<title>   </title>"])
+def test_entry_without_title_raises(title_xml):
+    xml = ('<feed xmlns="http://www.w3.org/2005/Atom" xmlns:yt="http://www.youtube.com/xml/schemas/2015">'
+           f'<entry><yt:videoId>abc</yt:videoId>{title_xml}<published>2026-11-18T09:00:00+00:00</published></entry></feed>')
+    with pytest.raises(ValueError, match="abc has no title"):
+        parse_feed(xml)

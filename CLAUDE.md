@@ -41,3 +41,5 @@ uv run pytest
 `notifier.notify` sends a Telegram message (`TELEGRAM_BOT_TOKEN`, `TELEGRAM_CHAT_ID` in `.env`; no-op if unset, never raises). Only with `--post`: on a crash (`__main__`), translation give-up, post failure, or duplicate-check failure (`pipeline`). Failures that retry next run notify again every run (no dedupe).
 
 `.env` (see `.env.example`) holds `PTT_ID`, `PTT_PW` and the Telegram vars. Never read or print `.env`.
+
+Accepted review findings (not to be re-raised) are listed in `docs/known-limitations.md`; add new ones there.

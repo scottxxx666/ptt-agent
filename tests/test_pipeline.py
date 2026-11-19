@@ -1,3 +1,4 @@
+from ptt_agent.formatter import UnknownMemberError
 from ptt_agent.pipeline import run
 from ptt_agent.state import load_seen, save_seen
 from ptt_agent.translator import Translation, TranslationError
@@ -166,3 +167,24 @@ def test_notifies_when_duplicate_check_fails(tmp_path, make_video):
     run(fetch=lambda: [make_video("a")], translate=translate_ok, post=Recorder(), state_path=state,
         do_post=True, already_posted=broken, notify=msgs.append)
     assert len(msgs) == 1 and "duplicate check failed" in msgs[0]
+
+
+def test_unknown_member_notifies_clearly_and_stays_unseen(tmp_path, make_video):
+    msgs, state = [], tmp_path / "s.json"
+    save_seen(state, set())
+
+    def unknown(item):
+        raise UnknownMemberError("unknown Weverse member 'X'; add it to MEMBER_ZH")
+    n = run(fetch=lambda: [make_video("a")], translate=translate_ok, post=Recorder(), state_path=state,
+            do_post=True, already_posted=unknown, notify=msgs.append)
+    assert n == 0 and load_seen(state) == set()
+    assert len(msgs) == 1 and "MEMBER_ZH" in msgs[0] and "duplicate check failed" not in msgs[0]
+
+
+def test_notifies_when_item_is_skipped_as_already_posted(tmp_path, make_video):
+    msgs, state = [], tmp_path / "s.json"
+    save_seen(state, set())
+    run(fetch=lambda: [make_video("a")], translate=translate_ok, post=Recorder(), state_path=state,
+        do_post=True, already_posted=lambda v: True, notify=msgs.append)
+    assert load_seen(state) == {"a"}
+    assert len(msgs) == 1 and "already posted" in msgs[0]
