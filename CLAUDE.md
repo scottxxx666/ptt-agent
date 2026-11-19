@@ -10,6 +10,7 @@ Watch the LE SSERAFIM YouTube channel; for each new long-form video, translate t
 - State: `state.json` (seen video ids). A missing file means first run: seed everything as seen, post nothing. A video is marked seen only after it was posted.
 - PyPtt needs Python >= 3.11 and a non-cloud IP (PTT blocks cloud IPs), so run it on a local machine.
 
+- Hand-post guard (`--post` only): before translating, `PttPoster.has_recent_post` searches the board for this account's last 10 posts (PyPtt author search). A title containing the key (YouTube: `YYMMDD`; Weverse: the full title) means it was posted by hand, so the item is marked seen and skipped. Same-day videos therefore collide on YouTube. If the check itself fails, the item retries next run. Real-board behaviour of the search is unverified; try it on `Test` first.
 - Translation failure: `pipeline` retries `agy` twice (3 attempts); if all fail the item is logged and marked seen (skipped for good, not in dry-run). Post failures are not marked and retry next run. `agy` can take ~2 min for odd titles, hence `translate_title` timeout 420s.
 
 ## Weverse (`--source weverse`)

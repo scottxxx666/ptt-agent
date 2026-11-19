@@ -103,3 +103,39 @@ def test_custom_title_builder_is_used(tmp_path, make_video):
     n = run(fetch=lambda: [make_video("a")], translate=translate_ok, post=rec, state_path=state,
             do_post=True, make_title=lambda v, t: f"T-{v.id}")
     assert n == 1 and rec.posts[0][0] == "T-a"
+
+
+def test_item_already_on_board_is_marked_seen_not_translated_or_posted(tmp_path, make_video):
+    state, rec, translated = tmp_path / "s.json", Recorder(), []
+    save_seen(state, set())
+
+    def tr(title):
+        translated.append(title)
+        return translate_ok(title)
+    vids = [make_video("hand", "A", "2026-11-18T08:00:00+00:00"),
+            make_video("new", "B", "2026-11-19T08:00:00+00:00")]
+    n = run(fetch=lambda: vids, translate=tr, post=rec, state_path=state, do_post=True,
+            already_posted=lambda v: v.id == "hand")
+    assert n == 1 and translated == ["B"] and len(rec.posts) == 1
+    assert load_seen(state) == {"hand", "new"}
+
+
+def test_failed_duplicate_check_leaves_item_unseen_and_unposted(tmp_path, make_video):
+    state, rec = tmp_path / "s.json", Recorder()
+    save_seen(state, set())
+
+    def boom(v):
+        raise RuntimeError("ptt down")
+    n = run(fetch=lambda: [make_video("a")], translate=translate_ok, post=rec, state_path=state,
+            do_post=True, already_posted=boom)
+    assert n == 0 and rec.posts == [] and load_seen(state) == set()
+
+
+def test_dry_run_skips_duplicate_check(tmp_path, make_video):
+    state = tmp_path / "s.json"
+    save_seen(state, set())
+
+    def boom(v):
+        raise AssertionError("must not log in during dry-run")
+    run(fetch=lambda: [make_video("a")], translate=translate_ok, post=None, state_path=state,
+        do_post=False, already_posted=boom)

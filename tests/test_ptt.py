@@ -32,3 +32,47 @@ def test_logout_runs_even_when_post_fails():
     with pytest.raises(RuntimeError):
         PttPoster("id", "pw", "Test", 1, api_factory=lambda: api).post("T", "C")
     assert api.calls[-1][0] == "logout"
+
+
+class SearchApi(FakeApi):
+    def __init__(self, titles):
+        super().__init__()
+        self.titles = titles  # oldest first, like the author-filtered board index
+
+    def get_newest_index(self, index_type, **kw):
+        import PyPtt
+        self.calls.append(("newest", kw))
+        if not self.titles:
+            PyPtt.i18n.init(PyPtt.Language.MANDARIN)  # PyPtt.API() does this; the exception needs it
+            raise PyPtt.NoSearchResult()
+        return len(self.titles)
+
+    def get_post(self, **kw):
+        import PyPtt
+        self.calls.append(("get_post", kw))
+        return {PyPtt.PostField.title: self.titles[kw["index"] - 1]}
+
+
+def poster(api):
+    return PttPoster("me", "pw", "Test", 1, api_factory=lambda: api)
+
+
+def test_recent_titles_searches_own_posts_newest_first_and_logs_out():
+    import PyPtt
+    api = SearchApi(["[影音] 261101 a", "[影音] 261102 b", "[影音] 261103 c"])
+    assert poster(api).recent_titles(limit=2) == ["[影音] 261103 c", "[影音] 261102 b"]
+    kw = api.calls[1][1]
+    assert kw["search_type"] == PyPtt.SearchType.AUTHOR and kw["search_condition"] == "me"
+    assert api.calls[-1][0] == "logout"
+
+
+def test_recent_titles_limit_larger_than_posts_and_no_posts():
+    assert len(poster(SearchApi(["t1", "t2"])).recent_titles(limit=10)) == 2
+    api = SearchApi([])
+    assert poster(api).recent_titles() == [] and api.calls[-1][0] == "logout"
+
+
+def test_has_recent_post_matches_key_inside_title():
+    p = poster(SearchApi(["[影音] 261102 手動發的"]))
+    assert p.has_recent_post("261102") is True
+    assert poster(SearchApi(["[影音] 261102 手動發的"])).has_recent_post("261103") is False

@@ -42,3 +42,14 @@ def test_color_is_reset_so_link_is_not_yellow_and_title_stays_clean(make_video):
     assert blank == ""
     assert title_line.endswith("\x15[m") and "💙" not in title_line
     assert "\x15" not in link_line
+
+
+def test_dup_keys():
+    from datetime import datetime
+    from types import SimpleNamespace
+    from ptt_agent.formatter import weverse_dup_key, youtube_dup_key
+    from ptt_agent.youtube import Video
+    v = Video("a", "t", datetime.fromisoformat("2026-11-18T17:00:00+00:00"))  # 01:00 next day in Taipei
+    assert youtube_dup_key(v) == "261119"
+    live = SimpleNamespace(published=v.published, author="SAKURA")
+    assert weverse_dup_key(live) == "261119 weverse live 宮脇咲良"

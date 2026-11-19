@@ -68,3 +68,12 @@ def build_weverse_title(live, translation: Translation) -> str:
             raise ValueError(f"unknown Weverse member {live.author!r}; add it to MEMBER_ZH")
         title += f" {MEMBER_ZH[live.author]}"
     return _fit_bytes(to_big5(title), MAX_TITLE_BYTES)
+
+
+def youtube_dup_key(video: Video) -> str:
+    """A hand-made post of this video has the same YYMMDD in its title."""
+    return video.published.astimezone(_TAIPEI).strftime("%y%m%d")
+
+
+def weverse_dup_key(live) -> str:
+    return build_weverse_title(live, None)

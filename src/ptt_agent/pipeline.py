@@ -21,8 +21,12 @@ def _translate_with_retry(translate, title: str):
 
 
 def run(*, fetch, translate, post, state_path: Path, do_post: bool,
-        make_title=build_title, make_content=build_content) -> int:
-    """Translate and post unseen items oldest-first. Returns the number posted."""
+        make_title=build_title, make_content=build_content, already_posted=None) -> int:
+    """Translate and post unseen items oldest-first. Returns the number posted.
+
+    already_posted(item) -> bool is asked before translating; True means it was posted by hand,
+    so the item is marked seen and skipped. If the check itself fails the item retries next run.
+    """
     videos = fetch()
     seen = load_seen(state_path)
     if seen is None:
@@ -32,6 +36,17 @@ def run(*, fetch, translate, post, state_path: Path, do_post: bool,
 
     posted = 0
     for video in sorted((v for v in videos if v.id not in seen), key=lambda v: v.published):
+        if do_post and already_posted:
+            try:
+                duplicate = already_posted(video)
+            except Exception:
+                log.exception("duplicate check failed for %s, will retry next run", video.id)
+                continue
+            if duplicate:
+                log.info("%s is already on the board, marking as seen", video.id)
+                seen.add(video.id)
+                save_seen(state_path, seen)
+                continue
         try:
             translation = _translate_with_retry(translate, video.title)
         except TranslationError:
