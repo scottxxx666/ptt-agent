@@ -25,12 +25,15 @@ launchctl print gui/$(id -u)/com.ptt-agent
 
 ## 切換看板
 
-看板和分類編號設在 plist 的 `EnvironmentVariables`（會蓋過 `.env`）：
+**預設是測試，只有排程是正式。** 手動執行時沒有設定看板就是 `Test`，狀態檔是 `state.dev.json`；正式設定只寫在 plist 的 `EnvironmentVariables`（會蓋過 `.env`）：
 
-| 變數 | 說明 |
-|---|---|
-| `PTT_BOARD` | `LE_SSERAFIM`（正式）或 `Test`（測試） |
-| `PTT_TITLE_INDEX` | 發文分類編號，`[影音]` 為 `1`；每個看板編號不同 |
+| 變數 | 正式（plist） | 手動執行預設 |
+|---|---|---|
+| `PTT_BOARD` | `LE_SSERAFIM` | `Test` |
+| `PTT_TITLE_INDEX` | `1`（`[影音]`；每個看板編號不同） | `1` |
+| `STATE_PATH` | `state.json`（已看過的影片） | `state.dev.json` |
+
+`.env` 只放帳密，**不要在裡面設 `PTT_BOARD`**，否則手動執行也可能發到正式版。
 
 ## 手動執行
 

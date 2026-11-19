@@ -24,7 +24,7 @@ uv run pytest
 ## Schedule (launchd)
 `~/Library/LaunchAgents/com.ptt-agent.plist` runs the job every 900s (enable/disable commands in README.md). It posts to a live board, so never `kickstart` or `bootstrap` it unless the user asks.
 - `StartInterval` does not fire at load; use `kickstart` to test.
-- The plist's `EnvironmentVariables` (`PTT_BOARD`, `PTT_TITLE_INDEX`) override `.env`, because `load_dotenv` does not overwrite existing env vars.
+- Safe by default: with no env set, the CLI targets board `Test` and state `state.dev.json`. Only the plist sets the live values (`PTT_BOARD=LE_SSERAFIM`, `STATE_PATH=state.json`, `PTT_TITLE_INDEX=1`), and they override `.env` because `load_dotenv` does not overwrite existing env vars. Keep `PTT_BOARD` out of `.env`. Manual runs must never touch the live `state.json`.
 - launchd has a minimal PATH, so the plist adds `~/.local/bin` for `agy`.
 
-Config in `.env` (see `.env.example`): `PTT_ID`, `PTT_PW`, `PTT_BOARD`, `PTT_TITLE_INDEX`, optional `STATE_PATH`. Never read or print `.env`.
+`.env` (see `.env.example`) holds only `PTT_ID`, `PTT_PW`. Never read or print `.env`.

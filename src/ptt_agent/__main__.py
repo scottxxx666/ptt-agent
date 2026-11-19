@@ -25,7 +25,7 @@ def main() -> None:
                            title_index=int(os.environ.get("PTT_TITLE_INDEX", "1")))
         post = poster.post
     run(fetch=fetch_videos, translate=translate_title, post=post,
-        state_path=Path(os.environ.get("STATE_PATH", PROJECT_ROOT / "state.json")),
+        state_path=Path(os.environ.get("STATE_PATH", PROJECT_ROOT / "state.dev.json")),
         do_post=args.post)
 
 
