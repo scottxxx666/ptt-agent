@@ -67,28 +67,13 @@ uv run pytest
 
 翻譯用的 `agy` 用你的 Google 帳號（Gemini Pro）登入，不用 API key。登入 token 存在 OS keyring（Linux Secret Service/dbus），而 VM 沒有桌面，所以 `deploy/with-keyring.sh` 每次執行時開一個私有 D-Bus session，並用**空密碼**解鎖 `gnome-keyring`，token 存在 `/opt/ptt-agent/.local/share/keyrings/`。代價：能讀 `ptt-agent` 家目錄的人就能讀到 token，所以 user 要專用。這是社群在 headless 環境的做法，官方文件沒有說明 Linux 無 keyring 時的行為，**我沒有驗證過**；官方的 headless 替代方案是 API key 或 ADC。
 
-在 VM 上（Debian 12）：
+在 VM 上（Debian 12）。前提是 `gcp-free-agents` 的 `startup.sh` 已跑過（WARP、keyring 套件）：
 
 ```bash
-# 1. uv（系統層級，unit 的 ExecStart 用 /usr/local/bin/uv）
-curl -LsSf https://astral.sh/uv/install.sh | sudo env UV_INSTALL_DIR=/usr/local/bin UV_NO_MODIFY_PATH=1 sh
-
-# 2. 專用 user 與程式碼
-sudo useradd --system --create-home --home-dir /opt/ptt-agent --shell /bin/bash ptt-agent
-sudo -u ptt-agent git clone <repo> /opt/ptt-agent/app
-sudo -u ptt-agent bash -c 'cd /opt/ptt-agent/app && uv sync --frozen --python 3.13'
-
-# 3. keyring 套件與 agy（裝到 /opt/ptt-agent/.local/bin/agy）
-sudo apt-get install -y dbus gnome-keyring libsecret-1-0
-sudo -u ptt-agent bash -c 'curl -fsSL https://antigravity.google/cli/install.sh | bash'
-
-# 4. secrets（填 PTT_ID PTT_PW TELEGRAM_*）
-sudo install -m 0600 -o root -g root /opt/ptt-agent/app/deploy/ptt-agent.env.example /etc/ptt-agent.env
-sudoedit /etc/ptt-agent.env
-
-# 5. unit
-sudo cp /opt/ptt-agent/app/deploy/ptt-agent.{service,timer} /etc/systemd/system/
-sudo systemctl daemon-reload
+# 一個指令，可重複執行：uv、ptt-agent user、clone/更新、依賴、agy、systemd unit、/etc/ptt-agent.env 範本。
+# 不會寫 secrets、不會登入 agy、不會啟用 timer。（repo 是 public 才能這樣 curl）
+curl -fsSL https://raw.githubusercontent.com/scottxxx666/ptt-agent/main/deploy/install.sh | sudo bash
+sudoedit /etc/ptt-agent.env      # 填 PTT_ID PTT_PW TELEGRAM_*
 ```
 
 先手動測。下面的 `EXEC` 用 systemd-run 載入同一份 `EnvironmentFile` 和 keyring 包裝；沒有設 `PTT_BOARD`/`STATE_PATH`，所以是 `Test` 看板和 `state.dev.json`，不會動正式：
