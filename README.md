@@ -97,3 +97,26 @@ eval "$EXEC" -p Environment=PTT_PROXY=socks5h://127.0.0.1:40000 $KR uv run --fro
 登入過期時（log 或 Telegram 出現翻譯失敗），重跑 a。
 
 啟用前（**會發到正式看板**）：先停 Mac 的 launchd（`launchctl bootout gui/$(id -u)/com.ptt-agent`）、把 Mac 的 `state.json` 複製到 `/opt/ptt-agent/state.json`（`chown ptt-agent`），再 `sudo systemctl enable --now ptt-agent.timer`。Mac 和 VM 不可同時啟用。
+
+### 搬到新 VM
+
+新舊 VM 不要同時啟用 timer（會重複發文）。順序是先把新 VM 準備好但不啟用，最後才切換。
+
+1. **建新 VM，等 startup script 跑完。** 在 `gcp-free-agents` 用 Terraform 建立（免費額度只有一台 e2-micro，新舊並存會多出費用）。確認 `sudo journalctl -u google-startup-scripts --no-pager | tail` 出現 `[startup] done`，且 `warp-cli --accept-tos status` 是 Connected。
+2. **裝 ptt-agent，不啟用 timer：**
+   ```bash
+   curl -fsSL https://raw.githubusercontent.com/scottxxx666/ptt-agent/main/deploy/install.sh | sudo bash
+   sudoedit /etc/ptt-agent.env      # 填 PTT_ID PTT_PW TELEGRAM_*
+   ```
+3. **在新 VM 重新登入 agy**（keyring 是各 VM 自己的，token 不會跟著搬）：上面的測試 a，再用 b 確認登入留得住。
+4. **確認 PTT 經 WARP 能登入**（只登入、搜尋、登出，不發文）：
+   ```bash
+   eval "$EXEC" -p Environment=PTT_PROXY=socks5h://127.0.0.1:40000 $KR uv run --frozen python -c 'import os; from ptt_agent.ptt import PttPoster as P; print(P(os.environ["PTT_ID"], os.environ["PTT_PW"], "Test", 1, proxy=os.environ["PTT_PROXY"]).recent_titles(3))'
+   ```
+5. **切換，這幾步連續做：**
+   1. 舊 VM：`sudo systemctl disable --now ptt-agent.timer`
+   2. 搬 state。它只是影片 id 的清單，直接貼：舊 VM `sudo cat /opt/ptt-agent/state.json`；新 VM `sudo -u ptt-agent tee /opt/ptt-agent/state.json`（貼上後按 Ctrl-D）。**不要讓新 VM 自己建 state**：它會把當下所有影片標成已看過，舊 VM 停機到新 VM 啟用之間出的影片就不會發。
+   3. 新 VM：`sudo systemctl enable --now ptt-agent.timer`，必要時 `sudo systemctl start ptt-agent.service` 跑第一輪，用 `sudo journalctl -u ptt-agent.service -f` 看 log。
+6. 確認新 VM 正常後，再刪舊 VM。
+
+外部 IP 會變：PTT 用帳密登入，不依賴 IP 白名單，但同一個專案裡有設舊 IP 白名單的服務（例如 bbgo 的交易所 API）要更新。
