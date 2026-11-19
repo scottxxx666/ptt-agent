@@ -23,6 +23,19 @@ launchctl print gui/$(id -u)/com.ptt-agent
 - 修改 plist 前要先停用，改完再啟用，否則不會生效。
 - Mac 睡眠或關機時不會執行，開機後繼續。
 
+## Weverse LIVE
+
+另一個排程 `~/Library/LaunchAgents/com.ptt-agent.weverse.plist`（每 15 分鐘，日誌 `run.weverse.log`），指令同上，把 `com.ptt-agent` 換成 `com.ptt-agent.weverse`。
+LIVE 結束後（出現在回放列表）才會發文，標題 `[影音] YYMMDD weverse live 成員名`。
+
+```bash
+uv run python -m ptt_agent.weverse_login          # 手動登入一次；session 過期（log 出現 WeverseError）時重跑
+uv run python -m ptt_agent --source weverse       # dry-run
+```
+
+- 第一次啟用只會把現有 LIVE 記成已看過，不發文。
+- 新成員／改名對不到 `formatter.MEMBER_ZH` 時會略過並在 log 報錯。
+
 ## 切換看板
 
 **預設是測試，只有排程是正式。** 手動執行時沒有設定看板就是 `Test`，狀態檔是 `state.dev.json`；正式設定只寫在 plist 的 `EnvironmentVariables`（會蓋過 `.env`）：

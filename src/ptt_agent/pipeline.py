@@ -7,8 +7,9 @@ from .state import load_seen, save_seen
 log = logging.getLogger("ptt_agent")
 
 
-def run(*, fetch, translate, post, state_path: Path, do_post: bool) -> int:
-    """Translate and post unseen videos oldest-first. Returns the number posted."""
+def run(*, fetch, translate, post, state_path: Path, do_post: bool,
+        make_title=build_title, make_content=build_content) -> int:
+    """Translate and post unseen items oldest-first. Returns the number posted."""
     videos = fetch()
     seen = load_seen(state_path)
     if seen is None:
@@ -20,7 +21,7 @@ def run(*, fetch, translate, post, state_path: Path, do_post: bool) -> int:
     for video in sorted((v for v in videos if v.id not in seen), key=lambda v: v.published):
         try:
             translation = translate(video.title)
-            title, content = build_title(video, translation), build_content(video, translation)
+            title, content = make_title(video, translation), make_content(video, translation)
             if not do_post:
                 print(f"[dry-run] {video.id}\n  title: {title}\n  content: {content}")
                 continue

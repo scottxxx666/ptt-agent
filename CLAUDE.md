@@ -10,6 +10,13 @@ Watch the LE SSERAFIM YouTube channel; for each new long-form video, translate t
 - State: `state.json` (seen video ids). A missing file means first run: seed everything as seen, post nothing. A video is marked seen only after it was posted.
 - PyPtt needs Python >= 3.11 and a non-cloud IP (PTT blocks cloud IPs), so run it on a local machine.
 
+## Weverse (`--source weverse`)
+Same pipeline, other source: `weverse.fetch_lives` → `translator` → `formatter.build_weverse_title` / `build_content` → `PttPoster`. Title is `[影音] YYMMDD weverse live <成員>` (the translation goes in the body, with the live URL).
+- Weverse needs a login. `uv run python -m ptt_agent.weverse_login` opens Chrome on `.weverse-profile/` (gitignored); log in by hand and close it. The job reuses that profile headless (`channel="chrome"`). When the session expires `fetch_lives` raises `WeverseError`; run the login command again.
+- The live page's own request to `.../liveTabPosts` is signed, so `fetch_lives` reads the page's response instead of calling the API. Only ended lives (replays) appear there.
+- Member comes from `author.artistOfficialProfile.officialName` (stable), never from the nickname. `formatter.MEMBER_ZH` maps it to the Chinese name; an unknown name is skipped and logged until added. The group account (`profileType` GROUP) gets no member suffix.
+- State defaults to `state.weverse.dev.json`; the live job is `~/Library/LaunchAgents/com.ptt-agent.weverse.plist` with `STATE_PATH=state.weverse.json`. Never `bootstrap`/`kickstart` it unless the user asks.
+
 ## PTT constraints (from PyPtt source)
 - Title is max 44 Big5 bytes and must be Big5-encodable; `formatter` drops unencodable chars (emoji, math alphanumerics) and cuts to the limit.
 - The category (e.g. `[影音]`) is chosen by `title_index`, the menu number on that board, set via `PTT_TITLE_INDEX`. It differs per board.

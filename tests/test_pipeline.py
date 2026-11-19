@@ -66,3 +66,11 @@ def test_dry_run_never_posts_or_marks_seen(tmp_path, make_video, capsys):
     assert go([make_video("a")], state, None, do_post=False) == 0
     assert load_seen(state) == set()
     assert "[dry-run] a" in capsys.readouterr().out
+
+
+def test_custom_title_builder_is_used(tmp_path, make_video):
+    state, rec = tmp_path / "s.json", Recorder()
+    save_seen(state, set())
+    n = run(fetch=lambda: [make_video("a")], translate=translate_ok, post=rec, state_path=state,
+            do_post=True, make_title=lambda v, t: f"T-{v.id}")
+    assert n == 1 and rec.posts[0][0] == "T-a"

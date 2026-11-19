@@ -37,3 +37,10 @@ def test_live_requires_explicit_env(monkeypatch):
     _, kw = c["poster"]
     assert kw["board"] == "LE_SSERAFIM" and kw["title_index"] == 1
     assert str(c["state_path"]) == "/x/state.json"
+
+
+def test_weverse_source_uses_its_own_default_state_and_builder(monkeypatch):
+    c = run_cli(monkeypatch, ["--source", "weverse"])
+    assert c["state_path"].name == "state.weverse.dev.json"
+    assert c["make_title"].__name__ == "build_weverse_title"
+    assert c["do_post"] is False

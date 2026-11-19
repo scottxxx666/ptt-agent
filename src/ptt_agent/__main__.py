@@ -5,6 +5,7 @@ from pathlib import Path
 
 from dotenv import load_dotenv
 
+from .formatter import build_weverse_title
 from .pipeline import run
 from .ptt import PttPoster
 from .translator import PROJECT_ROOT, translate_title
@@ -13,6 +14,7 @@ from .youtube import fetch_videos
 
 def main() -> None:
     parser = argparse.ArgumentParser(prog="ptt_agent")
+    parser.add_argument("--source", choices=["youtube", "weverse"], default="youtube")
     parser.add_argument("--post", action="store_true", help="actually post to PTT (default: dry-run)")
     args = parser.parse_args()
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
@@ -24,9 +26,16 @@ def main() -> None:
                            board=os.environ.get("PTT_BOARD", "Test"),
                            title_index=int(os.environ.get("PTT_TITLE_INDEX", "1")))
         post = poster.post
-    run(fetch=fetch_videos, translate=translate_title, post=post,
-        state_path=Path(os.environ.get("STATE_PATH", PROJECT_ROOT / "state.dev.json")),
-        do_post=args.post)
+    if args.source == "weverse":
+        from .weverse import fetch_lives
+        extra = dict(fetch=fetch_lives, make_title=build_weverse_title)
+        default_state = "state.weverse.dev.json"
+    else:
+        extra = dict(fetch=fetch_videos)
+        default_state = "state.dev.json"
+    run(translate=translate_title, post=post,
+        state_path=Path(os.environ.get("STATE_PATH", PROJECT_ROOT / default_state)),
+        do_post=args.post, **extra)
 
 
 if __name__ == "__main__":

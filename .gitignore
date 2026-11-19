@@ -3,4 +3,5 @@
 __pycache__/
 .pytest_cache/
 state*.json
-run.log
+run*.log
+.weverse-profile/

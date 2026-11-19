@@ -24,7 +24,7 @@ def _agy_bin() -> str:
     return shutil.which("agy") or str(Path.home() / ".local/bin/agy")
 
 
-def translate_title(title: str, run=subprocess.run, timeout: int = 180) -> Translation:
+def translate_title(title: str, run=subprocess.run, timeout: int = 420) -> Translation:
     cmd = [_agy_bin(), "-p", f"/ls {title}", "--output-format", "json",
            "--print-timeout", f"{timeout - 20}s"]
     try:

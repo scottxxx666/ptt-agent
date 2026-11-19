@@ -47,3 +47,24 @@ RESET = "\x15[m"
 
 def build_content(video: Video, translation: Translation) -> str:
     return f"{YELLOW}{to_big5(translation.title_zh)}{RESET}\n\n{video.url}\n"
+
+
+# Keyed by artistOfficialProfile.officialName from Weverse; nicknames change, this does not.
+MEMBER_ZH = {
+    "KIM CHAEWON": "金采源",
+    "SAKURA": "宮脇咲良",
+    "HUH YUNJIN": "許允真",
+    "KAZUHA": "中村一葉",
+    "HONG EUNCHAE": "洪恩採",
+}
+
+
+def build_weverse_title(live, translation: Translation) -> str:
+    """"YYMMDD weverse live <member>"; the official group account has no member suffix."""
+    date = live.published.astimezone(_TAIPEI).strftime("%y%m%d")
+    title = f"{date} weverse live"
+    if live.author is not None:
+        if live.author not in MEMBER_ZH:
+            raise ValueError(f"unknown Weverse member {live.author!r}; add it to MEMBER_ZH")
+        title += f" {MEMBER_ZH[live.author]}"
+    return _fit_bytes(to_big5(title), MAX_TITLE_BYTES)
