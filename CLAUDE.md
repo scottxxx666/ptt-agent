@@ -10,6 +10,8 @@ Watch the LE SSERAFIM YouTube channel; for each new long-form video, translate t
 - State: `state.json` (seen video ids). A missing file means first run: seed everything as seen, post nothing. A video is marked seen only after it was posted.
 - PyPtt needs Python >= 3.11 and a non-cloud IP (PTT blocks cloud IPs), so run it on a local machine.
 
+- Translation failure: `pipeline` retries `agy` twice (3 attempts); if all fail the item is logged and marked seen (skipped for good, not in dry-run). Post failures are not marked and retry next run. `agy` can take ~2 min for odd titles, hence `translate_title` timeout 420s.
+
 ## Weverse (`--source weverse`)
 Same pipeline, other source: `weverse.fetch_lives` → `translator` → `formatter.build_weverse_title` / `build_content` → `PttPoster`. Title is `[影音] YYMMDD weverse live <成員>` (the translation goes in the body, with the live URL).
 - Weverse needs a login. `uv run python -m ptt_agent.weverse_login` opens Chrome on `.weverse-profile/` (gitignored); log in by hand and close it. The job reuses that profile headless (`channel="chrome"`). When the session expires `fetch_lives` raises `WeverseError`; run the login command again.

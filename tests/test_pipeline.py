@@ -40,15 +40,44 @@ def test_posts_only_new_videos_oldest_first_and_remembers_them(tmp_path, make_vi
     assert go(vids, state, rec) == 0  # nothing reposted
 
 
-def test_translation_failure_is_retried_next_run(tmp_path, make_video):
-    state, rec = tmp_path / "s.json", Recorder()
+def test_translation_is_retried_twice_then_succeeds(tmp_path, make_video):
+    state, rec, calls = tmp_path / "s.json", Recorder(), []
     save_seen(state, set())
 
     def flaky(title):
+        calls.append(title)
+        if len(calls) < 3:
+            raise TranslationError("agy timeout")
+        return translate_ok(title)
+    assert go([make_video("a")], state, rec, translate=flaky) == 1
+    assert len(calls) == 3 and load_seen(state) == {"a"}
+
+
+def test_translation_failing_three_times_is_skipped_for_good(tmp_path, make_video):
+    state, rec, calls = tmp_path / "s.json", Recorder(), []
+    save_seen(state, set())
+
+    def bad_title_fails(title):
+        calls.append(title)
+        if title == "bad":
+            raise TranslationError("agy timeout")
+        return translate_ok(title)
+    vids = [make_video("a", "bad", "2026-11-18T08:00:00+00:00"),
+            make_video("b", "ok", "2026-11-18T09:00:00+00:00")]
+    assert go(vids, state, rec, translate=bad_title_fails) == 1
+    assert calls == ["bad", "bad", "bad", "ok"]  # 1 try + 2 retries, then moves on
+    assert load_seen(state) == {"a", "b"} and len(rec.posts) == 1
+    assert go(vids, state, rec, translate=bad_title_fails) == 0 and len(calls) == 4  # not retried next run
+
+
+def test_dry_run_does_not_skip_for_good(tmp_path, make_video):
+    state = tmp_path / "s.json"
+    save_seen(state, set())
+
+    def broken(title):
         raise TranslationError("agy timeout")
-    assert go([make_video("a")], state, rec, translate=flaky) == 0
-    assert load_seen(state) == set() and rec.posts == []
-    assert go([make_video("a")], state, rec) == 1
+    assert go([make_video("a")], state, None, translate=broken, do_post=False) == 0
+    assert load_seen(state) == set()
 
 
 def test_post_failure_does_not_mark_seen_and_does_not_block_others(tmp_path, make_video):

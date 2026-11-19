@@ -3,8 +3,21 @@ from pathlib import Path
 
 from .formatter import build_content, build_title
 from .state import load_seen, save_seen
+from .translator import TranslationError
 
 log = logging.getLogger("ptt_agent")
+
+TRANSLATE_RETRIES = 2
+
+
+def _translate_with_retry(translate, title: str):
+    for attempt in range(1, TRANSLATE_RETRIES + 2):
+        try:
+            return translate(title)
+        except TranslationError as e:
+            if attempt > TRANSLATE_RETRIES:
+                raise
+            log.warning("translation attempt %d failed (%s), retrying", attempt, e)
 
 
 def run(*, fetch, translate, post, state_path: Path, do_post: bool,
@@ -20,7 +33,14 @@ def run(*, fetch, translate, post, state_path: Path, do_post: bool,
     posted = 0
     for video in sorted((v for v in videos if v.id not in seen), key=lambda v: v.published):
         try:
-            translation = translate(video.title)
+            translation = _translate_with_retry(translate, video.title)
+        except TranslationError:
+            log.exception("giving up on %s after %d attempts", video.id, TRANSLATE_RETRIES + 1)
+            if do_post:  # skipped for good, otherwise it would burn agy time on every run
+                seen.add(video.id)
+                save_seen(state_path, seen)
+            continue
+        try:
             title, content = make_title(video, translation), make_content(video, translation)
             if not do_post:
                 print(f"[dry-run] {video.id}\n  title: {title}\n  content: {content}")
