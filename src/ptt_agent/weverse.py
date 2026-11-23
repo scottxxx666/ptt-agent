@@ -7,8 +7,10 @@ from .translator import PROJECT_ROOT
 
 LIVE_URL = "https://weverse.io/lesserafim/live"
 # The live page itself calls this endpoint; its URL carries a signature, so we read the
-# page's own response instead of building the request.
-_LIVE_LIST_SUFFIX = "/liveTabPosts"
+# page's own response instead of building the request. It holds both the running lives
+# (onAirLivePosts) and the ended ones (liveTabPosts); a running live keeps the same URL
+# as its replay.
+_LIVE_LIST_SUFFIX = "/liveTab"
 
 
 class WeverseError(Exception):
@@ -42,7 +44,7 @@ def parse_lives(payload: dict) -> list[Live]:
 
 def _parse_lives(payload: dict) -> list[Live]:
     lives = []
-    for post in payload["data"]:
+    for post in payload["onAirLivePosts"]["data"] + payload["liveTabPosts"]["data"]:
         author = post["author"]
         official = (author.get("artistOfficialProfile") or {}).get("officialName")
         if author.get("profileType") == "ARTIST" and not official:

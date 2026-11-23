@@ -14,25 +14,38 @@ def post(post_id="4-1", ms=1795009216000, profile_type="ARTIST", official="HUH Y
     return {"postId": post_id, "title": "허훈환", "publishedAt": ms, "author": author}
 
 
+def tab(*posts, on_air=()):
+    return {"onAirLivePosts": {"data": list(on_air)}, "liveTabPosts": {"data": list(posts)}}
+
+
 def test_parse_uses_official_name_not_nickname_and_converts_ms_to_utc():
-    (live,) = parse_lives({"data": [post(nick="새 닉네임")]})
+    (live,) = parse_lives(tab(post(nick="새 닉네임")))
     assert live == Live(id="4-1", title="허훈환", published=live.published, author="HUH YUNJIN")
     assert live.published.isoformat() == "2026-11-18T13:40:16+00:00"
     assert live.url == "https://weverse.io/lesserafim/live/4-1"
 
 
 def test_group_account_has_no_author():
-    (live,) = parse_lives({"data": [post(profile_type="GROUP", official=None, nick="LE SSERAFIM ")]})
+    (live,) = parse_lives(tab(post(profile_type="GROUP", official=None, nick="LE SSERAFIM ")))
     assert live.author is None
 
 
 def test_artist_without_official_name_is_an_error():
     with pytest.raises(WeverseError):
-        parse_lives({"data": [post(official=None)]})
+        parse_lives(tab(post(official=None)))
+
+
+def test_running_live_is_included_before_ended_ones():
+    lives = parse_lives(tab(post("4-1"), on_air=[post("4-2")]))
+    assert [l.id for l in lives] == ["4-2", "4-1"]
+
+
+def test_no_running_live_is_fine():
+    assert [l.id for l in parse_lives(tab(post("4-1")))] == ["4-1"]
 
 
 def live(author, ms=1795009216000):
-    return parse_lives({"data": [post(ms=ms, official=author, profile_type="ARTIST" if author else "GROUP")]})[0]
+    return parse_lives(tab(post(ms=ms, official=author, profile_type="ARTIST" if author else "GROUP")))[0]
 
 
 def test_title_has_taipei_date_and_member_name():
@@ -60,7 +73,14 @@ def test_all_member_names_are_big5_encodable():
         name.encode("big5uao")
 
 
-@pytest.mark.parametrize("payload", [{}, {"data": [{"postId": "1"}]}, {"data": None}, {"data": [None]}])
+@pytest.mark.parametrize("payload", [
+    {},
+    {"liveTabPosts": {"data": []}},
+    tab({"postId": "1"}),
+    tab(None),
+    {"onAirLivePosts": {"data": None}, "liveTabPosts": {"data": []}},
+    tab(on_air=[{"postId": "1"}]),
+])
 def test_malformed_payload_raises_weverse_error(payload):
     with pytest.raises(WeverseError):
         parse_lives(payload)
