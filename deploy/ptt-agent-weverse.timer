@@ -1,0 +1,9 @@
+[Unit]
+Description=Run ptt-agent weverse every 15 minutes
+
+[Timer]
+OnBootSec=7min
+OnUnitInactiveSec=15min
+
+[Install]
+WantedBy=timers.target

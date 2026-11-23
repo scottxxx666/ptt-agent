@@ -29,8 +29,13 @@ launchctl print gui/$(id -u)/com.ptt-agent
 LIVE 結束後（出現在回放列表）才會發文，標題 `[影音] YYMMDD weverse live 成員名`。
 
 ```bash
-uv run python -m ptt_agent.weverse_login          # 手動登入一次；session 過期（log 出現 WeverseError）時重跑
 uv run python -m ptt_agent --source weverse       # dry-run
+```
+
+**Weverse token**：直接打 API，不用瀏覽器。在已登入的 Chrome 開發者工具（Application → Cookies → `https://weverse.io`）點 `we2_refresh_token` 複製值，**複製完再**執行（值不會進 shell history）。refresh token 每次 refresh 都會輪替，程式會自動寫回檔案；只有過期（log 出現 `refresh token rejected`）或被登出時才要重做。
+
+```bash
+python3 -c 'import json,subprocess;print(json.dumps({"refresh_token":subprocess.check_output("pbpaste",text=True).strip()}))' > .weverse-token.json && chmod 600 .weverse-token.json
 ```
 
 - 第一次啟用只會把現有 LIVE 記成已看過，不發文。
@@ -63,7 +68,7 @@ uv run pytest
 
 ## Linux（GCP VM，systemd）
 
-`deploy/` 是 Linux 版排程，只跑 YouTube（Weverse 還沒搬）。VM 端（WARP、機器設定）在 `gcp-free-agents` repo 的 `scripts/startup.sh`。PTT 擋雲端 IP，所以 unit 設了 `PTT_PROXY=socks5h://127.0.0.1:40000`（WARP proxy 模式），只有 PyPtt 的 websocket 會走它。
+`deploy/` 是 Linux 版排程：`ptt-agent`（YouTube）和 `ptt-agent-weverse`（Weverse）兩組 service/timer。VM 端（WARP、機器設定）在 `gcp-free-agents` repo 的 `scripts/startup.sh`。PTT 擋雲端 IP，所以 unit 設了 `PTT_PROXY=socks5h://127.0.0.1:40000`（WARP proxy 模式），只有 PyPtt 的 websocket 會走它。
 
 翻譯用的 `agy` 用你的 Google 帳號（Gemini Pro）登入，不用 API key。登入 token 存在 OS keyring（Linux Secret Service/dbus），而 VM 沒有桌面，所以 `deploy/with-keyring.sh` 每次執行時開一個私有 D-Bus session，並用**空密碼**解鎖 `gnome-keyring`，token 存在 `/opt/ptt-agent/.local/share/keyrings/`。代價：能讀 `ptt-agent` 家目錄的人就能讀到 token，所以 user 要專用。這是社群在 headless 環境的做法，官方文件沒有說明 Linux 無 keyring 時的行為，**我沒有驗證過**；官方的 headless 替代方案是 API key 或 ADC。
 
@@ -74,6 +79,12 @@ uv run pytest
 # 不會寫 secrets、不會登入 agy、不會啟用 timer。（repo 是 public 才能這樣 curl）
 curl -fsSL https://raw.githubusercontent.com/scottxxx666/ptt-agent/main/deploy/install.sh | sudo bash
 sudoedit /etc/ptt-agent.env      # 填 PTT_ID PTT_PW TELEGRAM_*
+```
+
+Weverse 要另外放 token。refresh token 會輪替，所以 **VM 要用自己獨立的一份**，不能從 Mac 的 `.weverse-token.json` 複製（兩邊共用會互相讓對方失效）：在無痕視窗登入 weverse.io，複製那個 session 的 `we2_refresh_token`，在 VM 貼進下面的指令後按 Enter、Ctrl-D（值不會進 history）：
+
+```bash
+sudo -u ptt-agent sh -c 'umask 077; python3 -c "import json,sys;print(json.dumps({\"refresh_token\":sys.stdin.read().strip()}))" > /opt/ptt-agent/weverse-token.json'
 ```
 
 先手動測。下面的 `EXEC` 用 systemd-run 載入同一份 `EnvironmentFile` 和 keyring 包裝；沒有設 `PTT_BOARD`/`STATE_PATH`，所以是 `Test` 看板和 `state.dev.json`，不會動正式：
@@ -96,7 +107,7 @@ eval "$EXEC" -p Environment=PTT_PROXY=socks5h://127.0.0.1:40000 $KR uv run --fro
 
 登入過期時（log 或 Telegram 出現翻譯失敗），重跑 a。
 
-啟用前（**會發到正式看板**）：先停 Mac 的 launchd（`launchctl bootout gui/$(id -u)/com.ptt-agent`）、把 Mac 的 `state.json` 複製到 `/opt/ptt-agent/state.json`（`chown ptt-agent`），再 `sudo systemctl enable --now ptt-agent.timer`。Mac 和 VM 不可同時啟用。
+啟用前（**會發到正式看板**）：先停 Mac 的 launchd（`launchctl bootout gui/$(id -u)/com.ptt-agent`）、把 Mac 的 `state.json` 複製到 `/opt/ptt-agent/state.json`（`chown ptt-agent`），再 `sudo systemctl enable --now ptt-agent.timer`。Weverse 同理：停 `com.ptt-agent.weverse`、把 `state.weverse.json` 複製到 `/opt/ptt-agent/state.weverse.json`，再 `sudo systemctl enable --now ptt-agent-weverse.timer`。Mac 和 VM 不可同時啟用。
 
 ### 搬到新 VM
 

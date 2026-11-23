@@ -6,7 +6,7 @@ Flow: `youtube.fetch_videos` → `pipeline.run` → `translator.translate_title`
 
 ## Docs (read when relevant)
 - `docs/pipeline.md`: translator output contract, state/seen semantics, hand-post guard, failure handling, PTT title limits, Telegram notifications
-- `docs/weverse.md`: Weverse login, scraping, member mapping
+- `docs/weverse.md`: Weverse API signing, token rotation, member mapping
 - `docs/known-limitations.md`: accepted review findings, not to be re-raised; add new ones there
 - `README.md`: setup and launchd enable/disable commands
 
@@ -16,7 +16,7 @@ Flow: `youtube.fetch_videos` → `pipeline.run` → `translator.translate_title`
 - Safe by default: with no env set the CLI targets board `Test` and state `state.dev.json`. Only the plists set live values (`PTT_BOARD`, `STATE_PATH`, `PTT_TITLE_INDEX`). Keep `PTT_BOARD` out of `.env`. Manual runs must never touch live `state.json` / `state.weverse.json`.
 - Never read or print `.env` (see `.env.example`).
 - Needs Python >= 3.11 and a non-cloud IP (PTT blocks cloud IPs): run locally, or on a cloud VM with `PTT_PROXY` pointing at a non-cloud SOCKS5 proxy (Cloudflare WARP proxy mode). `PTT_PROXY` only affects PyPtt's websocket (via `WSS_PROXY`); unset = direct, which is what the Mac uses.
-- `deploy/` holds the Linux systemd unit/timer; the VM side (WARP, host layout) is in the `gcp-free-agents` repo. The Mac launchd jobs and the VM timer must never both be live (duplicate posts).
+- `deploy/` holds the Linux systemd units/timers (YouTube and Weverse); the VM side (WARP, host layout) is in the `gcp-free-agents` repo. The Mac launchd jobs and the VM timer must never both be live (duplicate posts).
 
 ## Run
 ```

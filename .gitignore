@@ -5,3 +5,4 @@ __pycache__/
 state*.json
 run*.log
 .weverse-profile/
+.weverse-token.json

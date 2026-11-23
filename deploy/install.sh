@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # One-shot, repeatable setup of ptt-agent on a Debian VM. Run as root: sudo ./install.sh
 # Needs the VM packages from gcp-free-agents scripts/startup.sh (dbus, gnome-keyring, WARP).
-# Does NOT: write secrets, log agy in, or enable the timer (that posts to the live board).
+# Does NOT: write secrets, log agy in, seed the Weverse token, or enable the timers (that posts to the live board).
 set -euo pipefail
 
 REPO_URL="${REPO_URL:-https://github.com/scottxxx666/ptt-agent.git}"
@@ -44,8 +44,9 @@ if [ ! -x "$APP_HOME/.local/bin/agy" ]; then
 fi
 [ -x "$APP_HOME/.local/bin/agy" ] || die "agy not found after install"
 
-log "installing systemd units (timer NOT enabled)"
-install -m 0644 "$APP_DIR"/deploy/ptt-agent.service "$APP_DIR"/deploy/ptt-agent.timer /etc/systemd/system/
+log "installing systemd units (timers NOT enabled)"
+install -m 0644 "$APP_DIR"/deploy/ptt-agent.service "$APP_DIR"/deploy/ptt-agent.timer \
+  "$APP_DIR"/deploy/ptt-agent-weverse.service "$APP_DIR"/deploy/ptt-agent-weverse.timer /etc/systemd/system/
 systemctl daemon-reload
 
 if [ ! -e /etc/ptt-agent.env ]; then
@@ -57,5 +58,6 @@ cat <<NEXT
 [install] done. Next, by hand:
   1. sudoedit /etc/ptt-agent.env
   2. log agy in (README: Linux, test a), then test b, c, d
-  3. only when ready for the live board: sudo systemctl enable --now ptt-agent.timer
+  3. Weverse: seed /opt/ptt-agent/weverse-token.json (README)
+  4. only when ready for the live board: sudo systemctl enable --now ptt-agent.timer ptt-agent-weverse.timer
 NEXT
