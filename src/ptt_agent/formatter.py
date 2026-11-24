@@ -1,3 +1,4 @@
+from dataclasses import dataclass
 from datetime import timedelta, timezone
 
 import PyPtt  # noqa: F401  (registers the big5uao codec)
@@ -50,34 +51,64 @@ def build_content(video: Video, translation: Translation) -> str:
 
 
 # Keyed by artistOfficialProfile.officialName from Weverse; nicknames change, this does not.
+# Values are the names as written in the posts (given name only, Japanese members in Latin).
 MEMBER_ZH = {
-    "KIM CHAEWON": "金采源",
-    "SAKURA": "宮脇咲良",
-    "HUH YUNJIN": "許允真",
-    "KAZUHA": "中村一葉",
-    "HONG EUNCHAE": "洪恩採",
+    "KIM CHAEWON": "采源",
+    "SAKURA": "SAKURA",
+    "HUH YUNJIN": "允真",
+    "KAZUHA": "KAZUHA",
+    "HONG EUNCHAE": "恩採",
 }
+CYAN = "\x15[1;36m"
 
 
 class UnknownMemberError(ValueError):
     pass
 
 
-def build_weverse_title(live, translation: Translation) -> str:
-    """"YYMMDD weverse live <member>"; the official group account has no member suffix."""
-    date = live.published.astimezone(_TAIPEI).strftime("%y%m%d")
-    title = f"{date} weverse live"
-    if live.author is not None:
-        if live.author not in MEMBER_ZH:
-            raise UnknownMemberError(f"unknown Weverse member {live.author!r}; add it to MEMBER_ZH")
-        title += f" {MEMBER_ZH[live.author]}"
-    return _fit_bytes(to_big5(title), MAX_TITLE_BYTES)
+@dataclass(frozen=True)
+class WeverseEntry:
+    live: object
+    name: str | None  # None for the official group account
+    translation: Translation
+
+
+def weverse_member_name(live) -> str | None:
+    if live.author is None:
+        return None
+    if live.author not in MEMBER_ZH:
+        raise UnknownMemberError(f"unknown Weverse member {live.author!r}; add it to MEMBER_ZH")
+    return MEMBER_ZH[live.author]
+
+
+def weverse_day(live) -> str:
+    return live.published.astimezone(_TAIPEI).strftime("%y%m%d")
+
+
+def build_weverse_title(day: str) -> str:
+    """One post per Taipei day; also the key used to find that day's post for comments."""
+    return f"{day} weverse live"
+
+
+def _weverse_text(e: WeverseEntry) -> str:
+    return " ".join(filter(None, (to_big5(e.translation.title_zh), e.name and to_big5(e.name))))
+
+
+def build_weverse_content(entries: list[WeverseEntry]) -> str:
+    blocks = []
+    for e in entries:
+        line = f"{YELLOW}{to_big5(e.translation.title_zh)}{RESET}"
+        if e.name:
+            line += f" {CYAN}{to_big5(e.name)}{RESET}"
+        blocks.append(f"{line}\n\n{e.live.url}\n")
+    return "\n".join(blocks)
+
+
+def build_weverse_comment(e: WeverseEntry) -> str:
+    """PTT comments carry no colour; PyPtt splits long ones at the board's line width."""
+    return f"{_weverse_text(e)}\n{e.live.url}"
 
 
 def youtube_dup_key(video: Video) -> str:
     """A hand-made post of this video has the same YYMMDD in its title."""
     return video.published.astimezone(_TAIPEI).strftime("%y%m%d")
-
-
-def weverse_dup_key(live) -> str:
-    return build_weverse_title(live, None)

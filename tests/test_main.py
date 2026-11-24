@@ -7,6 +7,7 @@ def run_cli(monkeypatch, argv, env=()):
     captured = {}
     monkeypatch.setattr(cli, "load_dotenv", lambda *a, **k: None)
     monkeypatch.setattr(cli, "run", lambda **kw: captured.update(kw))
+    monkeypatch.setattr(cli, "run_daily", lambda **kw: captured.update(kw))
     monkeypatch.setattr(cli, "PttPoster", lambda *a, **kw: captured.setdefault("poster", (a, kw)) and type("P", (), {"post": None})())
     for k in ("STATE_PATH", "PTT_BOARD", "PTT_TITLE_INDEX", "PTT_PROXY"):
         monkeypatch.delenv(k, raising=False)
@@ -39,10 +40,10 @@ def test_live_requires_explicit_env(monkeypatch):
     assert str(c["state_path"]) == "/x/state.json"
 
 
-def test_weverse_source_uses_its_own_default_state_and_builder(monkeypatch):
+def test_weverse_source_uses_its_own_default_state_and_daily_runner(monkeypatch):
     c = run_cli(monkeypatch, ["--source", "weverse"])
     assert c["state_path"].name == "state.weverse.dev.json"
-    assert c["make_title"].__name__ == "build_weverse_title"
+    assert c["comment"] is None and c["find_post"] is None
     assert c["do_post"] is False
 
 

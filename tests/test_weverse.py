@@ -1,10 +1,7 @@
 import pytest
 
-from ptt_agent.formatter import MEMBER_ZH, build_weverse_title
-from ptt_agent.translator import Translation
+from ptt_agent.formatter import MEMBER_ZH, build_weverse_title, weverse_day
 from ptt_agent.weverse import Live, WeverseError, parse_lives
-
-T = Translation(title_zh="譯", title_original="원문")
 
 
 def post(post_id="4-1", ms=1795009216000, profile_type="ARTIST", official="HUH YUNJIN", nick="huh?"):
@@ -48,23 +45,15 @@ def live(author, ms=1795009216000):
     return parse_lives(tab(post(ms=ms, official=author, profile_type="ARTIST" if author else "GROUP")))[0]
 
 
-def test_title_has_taipei_date_and_member_name():
+def test_day_is_taipei_date_and_title_has_no_member():
     # 2026-11-18 13:40 UTC is 21:40 in Taipei, same day
-    assert build_weverse_title(live("HUH YUNJIN"), T) == "261118 weverse live 許允真"
+    assert weverse_day(live("HUH YUNJIN")) == "261118"
+    assert build_weverse_title(weverse_day(live("HUH YUNJIN"))) == "261118 weverse live"
 
 
-def test_title_date_rolls_over_in_taipei_time():
+def test_day_rolls_over_in_taipei_time():
     # 2026-11-18 18:00 UTC is 02:00 on the 19th in Taipei
-    assert build_weverse_title(live("KAZUHA", ms=1795024800000), T) == "261119 weverse live 中村一葉"
-
-
-def test_group_account_title_has_no_member_suffix():
-    assert build_weverse_title(live(None), T) == "261118 weverse live"
-
-
-def test_unknown_member_is_rejected_not_posted_without_name():
-    with pytest.raises(ValueError):
-        build_weverse_title(live("SOMEONE NEW"), T)
+    assert weverse_day(live("KAZUHA", ms=1795024800000)) == "261119"
 
 
 def test_all_member_names_are_big5_encodable():

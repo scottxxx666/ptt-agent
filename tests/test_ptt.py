@@ -170,3 +170,34 @@ def test_websockets_picks_wss_proxy_for_ptt_but_not_https_proxy_alone(monkeypatc
     assert get_proxy(uri) is None
     monkeypatch.setenv("WSS_PROXY", PROXY)
     assert get_proxy(uri) == PROXY
+
+
+class AidApi(SearchApi):
+    def get_post(self, **kw):
+        import PyPtt
+        post = super().get_post(**kw)
+        post[PyPtt.PostField.aid] = f"AID{kw['index']}"
+        return post
+
+    def comment(self, **kw):
+        self.calls.append(("comment", kw))
+
+
+def test_find_post_aid_returns_newest_match_and_none_when_absent():
+    api = AidApi(["[影音] 261101 weverse live", "[影音] 261102 x", "[影音] 261101 weverse live 允真"])
+    assert poster(api).find_post_aid("261101 weverse live") == "AID3"
+    assert api.calls[-1][0] == "logout"
+    assert poster(AidApi(["a", "b"])).find_post_aid("zzz") is None
+    assert poster(AidApi([])).find_post_aid("zzz") is None
+
+
+def test_find_post_aid_only_looks_at_the_last_limit_posts():
+    assert poster(AidApi(["key", "a", "b"])).find_post_aid("key", limit=2) is None
+
+
+def test_comment_logs_in_comments_with_arrow_and_logs_out():
+    import PyPtt
+    api = AidApi([])
+    poster(api).comment("AID9", "hi")
+    assert [c[0] for c in api.calls] == ["login", "comment", "logout"]
+    assert api.calls[1][1] == dict(board="Test", comment_type=PyPtt.CommentType.ARROW, content="hi", aid="AID9")

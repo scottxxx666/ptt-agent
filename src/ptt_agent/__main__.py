@@ -5,9 +5,9 @@ from pathlib import Path
 
 from dotenv import load_dotenv
 
-from .formatter import build_weverse_title, weverse_dup_key, youtube_dup_key
+from .formatter import youtube_dup_key
 from .notifier import notify
-from .pipeline import run
+from .pipeline import run, run_daily
 from .ptt import PttPoster
 from .translator import PROJECT_ROOT, translate_title
 from .youtube import fetch_videos
@@ -28,20 +28,19 @@ def main() -> None:
                            title_index=int(os.environ.get("PTT_TITLE_INDEX", "1")),
                            proxy=os.environ.get("PTT_PROXY") or None)
         post = poster.post
-    if args.source == "weverse":
-        from .weverse import fetch_lives
-        extra = dict(fetch=fetch_lives, make_title=build_weverse_title)
-        dup_key = weverse_dup_key
-        default_state = "state.weverse.dev.json"
-    else:
-        extra = dict(fetch=fetch_videos)
-        dup_key = youtube_dup_key
-        default_state = "state.dev.json"
-    already_posted = (lambda item: poster.has_recent_post(dup_key(item))) if poster else None
+    state_path = Path(os.environ.get("STATE_PATH", PROJECT_ROOT / (
+        "state.weverse.dev.json" if args.source == "weverse" else "state.dev.json")))
     try:
-        run(translate=translate_title, post=post, already_posted=already_posted,
-            state_path=Path(os.environ.get("STATE_PATH", PROJECT_ROOT / default_state)),
-            do_post=args.post, notify=notify if args.post else None, **extra)
+        if args.source == "weverse":
+            from .weverse import fetch_lives
+            run_daily(fetch=fetch_lives, translate=translate_title, post=post,
+                      comment=poster.comment if poster else None,
+                      find_post=poster.find_post_aid if poster else None,
+                      state_path=state_path, do_post=args.post, notify=notify if args.post else None)
+        else:
+            already_posted = (lambda item: poster.has_recent_post(youtube_dup_key(item))) if poster else None
+            run(fetch=fetch_videos, translate=translate_title, post=post, already_posted=already_posted,
+                state_path=state_path, do_post=args.post, notify=notify if args.post else None)
     except Exception as e:
         if args.post:
             notify(f"[ptt-agent:{args.source}] crashed: {type(e).__name__}: {e}")

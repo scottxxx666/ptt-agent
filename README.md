@@ -26,7 +26,7 @@ launchctl print gui/$(id -u)/com.ptt-agent
 ## Weverse LIVE
 
 Weverse 只在 VM 上跑（`ptt-agent-weverse.timer`，每 15 分鐘，安裝見下方「Linux」），Mac 沒有排程。
-LIVE 結束後（出現在回放列表）才會發文，標題 `[影音] YYMMDD weverse live 成員名`。
+LIVE 結束後（出現在回放列表）才會發文，同一天只發一篇，標題 `[影音] YYMMDD weverse live`；當天之後的直播以推文補在該篇底下（標題含 `YYMMDD weverse live` 的最近 10 篇自己的文章，手動發的也算）。
 
 ```bash
 uv run python -m ptt_agent --source weverse       # dry-run

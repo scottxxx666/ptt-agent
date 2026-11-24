@@ -44,12 +44,47 @@ def test_color_is_reset_so_link_is_not_yellow_and_title_stays_clean(make_video):
     assert "\x15" not in link_line
 
 
-def test_dup_keys():
+def test_youtube_dup_key():
     from datetime import datetime
-    from types import SimpleNamespace
-    from ptt_agent.formatter import weverse_dup_key, youtube_dup_key
+    from ptt_agent.formatter import youtube_dup_key
     from ptt_agent.youtube import Video
     v = Video("a", "t", datetime.fromisoformat("2026-11-18T17:00:00+00:00"))  # 01:00 next day in Taipei
     assert youtube_dup_key(v) == "261119"
-    live = SimpleNamespace(published=v.published, author="SAKURA")
-    assert weverse_dup_key(live) == "261119 weverse live 宮脇咲良"
+
+
+def live(author="HUH YUNJIN", id="2-1", published="2026-11-18T17:00:00+00:00"):
+    from datetime import datetime
+    from ptt_agent.weverse import Live
+    return Live(id=id, title="t", published=datetime.fromisoformat(published), author=author)
+
+
+def test_weverse_title_is_just_the_taipei_day():
+    from ptt_agent.formatter import build_weverse_title, weverse_day
+    assert weverse_day(live()) == "261119"
+    assert build_weverse_title("261119") == "261119 weverse live"
+
+
+def test_weverse_member_names_and_unknown_member():
+    import pytest
+    from ptt_agent.formatter import UnknownMemberError, weverse_member_name
+    assert [weverse_member_name(live(a)) for a in
+            ("KIM CHAEWON", "SAKURA", "HUH YUNJIN", "KAZUHA", "HONG EUNCHAE", None)] == [
+        "采源", "SAKURA", "允真", "KAZUHA", "恩採", None]
+    with pytest.raises(UnknownMemberError):
+        weverse_member_name(live("NEW PERSON"))
+
+
+def test_weverse_content_yellow_text_cyan_name_then_link_blocks_separated_by_blank_line():
+    from ptt_agent.formatter import WeverseEntry, build_weverse_content
+    a = WeverseEntry(live(id="2-1"), "允真", tr("嗨～"))
+    b = WeverseEntry(live(None, id="2-2"), None, tr("全員直播"))
+    assert build_weverse_content([a, b]) == (
+        "\x15[1;33m嗨～\x15[m \x15[1;36m允真\x15[m\n\nhttps://weverse.io/lesserafim/live/2-1\n"
+        "\n"
+        "\x15[1;33m全員直播\x15[m\n\nhttps://weverse.io/lesserafim/live/2-2\n")
+
+
+def test_weverse_comment_is_plain_text_and_drops_unencodable_chars():
+    from ptt_agent.formatter import WeverseEntry, build_weverse_comment
+    c = build_weverse_comment(WeverseEntry(live(), "允真", tr("嗨💙")))
+    assert c == "嗨 允真\nhttps://weverse.io/lesserafim/live/2-1" and "\x15" not in c

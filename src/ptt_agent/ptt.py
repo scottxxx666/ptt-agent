@@ -76,6 +76,36 @@ class PttPoster:
             finally:
                 self._logout(api)
 
+    def find_post_aid(self, key: str, limit: int = RECENT_LIMIT) -> str | None:
+        """AID of this account's newest post among the last `limit` with `key` in its title, else None."""
+        import PyPtt
+        with self._proxied():
+            api = self._api_factory() if self._api_factory else self._default_api()
+            api.login(ptt_id=self._id, ptt_pw=self._pw)
+            try:
+                search = dict(search_type=PyPtt.SearchType.AUTHOR, search_condition=self._id)
+                try:
+                    newest = api.get_newest_index(PyPtt.NewIndex.BOARD, board=self._board, **search)
+                except PyPtt.NoSearchResult:
+                    return None
+                for i in range(newest, max(newest - limit, 0), -1):
+                    post = api.get_post(board=self._board, index=i, query=True, **search)
+                    if key in post[PyPtt.PostField.title]:
+                        return post[PyPtt.PostField.aid]
+                return None
+            finally:
+                self._logout(api)
+
+    def comment(self, aid: str, content: str) -> None:
+        import PyPtt
+        with self._proxied():
+            api = self._api_factory() if self._api_factory else self._default_api()
+            api.login(ptt_id=self._id, ptt_pw=self._pw)
+            try:
+                api.comment(board=self._board, comment_type=PyPtt.CommentType.ARROW, content=content, aid=aid)
+            finally:
+                self._logout(api)
+
     @staticmethod
     def _default_api():
         import PyPtt

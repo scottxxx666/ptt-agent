@@ -188,3 +188,111 @@ def test_notifies_when_item_is_skipped_as_already_posted(tmp_path, make_video):
         do_post=True, already_posted=lambda v: True, notify=msgs.append)
     assert load_seen(state) == {"a"}
     assert len(msgs) == 1 and "already posted" in msgs[0]
+
+
+# ---- run_daily (Weverse: one post per Taipei day) ----
+from datetime import datetime
+
+from ptt_agent.pipeline import run_daily
+from ptt_agent.weverse import Live
+
+
+def mk(id, author="HUH YUNJIN", published="2026-11-18T09:00:00+00:00"):
+    return Live(id=id, title=f"T{id}", published=datetime.fromisoformat(published), author=author)
+
+
+class Board:
+    def __init__(self, aid=None, fail_comment=False):
+        self.aid, self.posts, self.comments, self.fail_comment = aid, [], [], fail_comment
+
+    def post(self, title, content):
+        self.posts.append((title, content))
+
+    def comment(self, aid, text):
+        if self.fail_comment:
+            raise RuntimeError("push failed")
+        self.comments.append((aid, text))
+
+    def find_post(self, title):
+        self.looked_up = title
+        return self.aid
+
+
+def go_daily(lives, state, board, translate=translate_ok, do_post=True, notify=None):
+    return run_daily(fetch=lambda: lives, translate=translate, post=board.post, comment=board.comment,
+                     find_post=board.find_post, state_path=state, do_post=do_post, notify=notify)
+
+
+def test_daily_first_run_seeds_without_posting(tmp_path):
+    state, board = tmp_path / "s.json", Board()
+    assert go_daily([mk("a")], state, board) == 0
+    assert board.posts == [] and load_seen(state) == {"a"}
+
+
+def test_daily_merges_same_day_lives_into_one_post(tmp_path):
+    state, board = tmp_path / "s.json", Board()
+    save_seen(state, set())
+    lives = [mk("b", "SAKURA", "2026-11-18T10:00:00+00:00"), mk("a", "HUH YUNJIN", "2026-11-18T08:00:00+00:00")]
+    assert go_daily(lives, state, board) == 2
+    (title, content), = board.posts
+    assert title == "261118 weverse live" and board.looked_up == title
+    assert content.index("譯:Ta") < content.index("譯:Tb")
+    assert "允真" in content and "SAKURA" in content and board.comments == []
+    assert load_seen(state) == {"a", "b"}
+
+
+def test_daily_posts_one_post_per_day(tmp_path):
+    state, board = tmp_path / "s.json", Board()
+    save_seen(state, set())
+    go_daily([mk("a", published="2026-11-18T09:00:00+00:00"), mk("b", published="2026-11-19T09:00:00+00:00")],
+             state, board)
+    assert [t for t, _ in board.posts] == ["261118 weverse live", "261119 weverse live"]
+
+
+def test_daily_comments_on_the_existing_post_instead_of_posting(tmp_path):
+    state, board = tmp_path / "s.json", Board(aid="AID1")
+    save_seen(state, set())
+    assert go_daily([mk("a"), mk("b", "SAKURA")], state, board) == 2
+    assert board.posts == [] and [a for a, _ in board.comments] == ["AID1", "AID1"]
+    assert board.comments[0][1] == "譯:Ta 允真\nhttps://weverse.io/lesserafim/live/a"
+    assert load_seen(state) == {"a", "b"}
+
+
+def test_daily_failed_comment_stays_unseen_and_notifies(tmp_path):
+    state, board, msgs = tmp_path / "s.json", Board(aid="AID1", fail_comment=True), []
+    save_seen(state, set())
+    assert go_daily([mk("a")], state, board, notify=msgs.append) == 0
+    assert load_seen(state) == set() and len(msgs) == 1 and "retrying" in msgs[0]
+
+
+def test_daily_lookup_failure_retries_next_run(tmp_path):
+    state, board, msgs = tmp_path / "s.json", Board(), []
+    save_seen(state, set())
+    board.find_post = lambda title: (_ for _ in ()).throw(RuntimeError("search failed"))
+    assert go_daily([mk("a")], state, board, notify=msgs.append) == 0
+    assert board.posts == [] and load_seen(state) == set() and "lookup failed" in msgs[0]
+
+
+def test_daily_unknown_member_is_skipped_but_others_still_post(tmp_path):
+    state, board, msgs = tmp_path / "s.json", Board(), []
+    save_seen(state, set())
+    assert go_daily([mk("a", "NEW PERSON"), mk("b")], state, board, notify=msgs.append) == 1
+    assert load_seen(state) == {"b"} and "MEMBER_ZH" in msgs[0]
+
+
+def test_daily_translation_failure_is_skipped_for_good(tmp_path):
+    state, board, msgs = tmp_path / "s.json", Board(), []
+    save_seen(state, set())
+
+    def bad(title):
+        raise TranslationError("nope")
+    assert go_daily([mk("a")], state, board, translate=bad, notify=msgs.append) == 0
+    assert load_seen(state) == {"a"} and "translation failed" in msgs[0]
+
+
+def test_daily_dry_run_prints_and_touches_nothing(tmp_path, capsys):
+    state, board = tmp_path / "s.json", Board(aid="X")
+    save_seen(state, set())
+    assert go_daily([mk("a")], state, board, do_post=False) == 0
+    assert "261118 weverse live" in capsys.readouterr().out
+    assert board.posts == board.comments == [] and load_seen(state) == set()

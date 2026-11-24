@@ -1,7 +1,8 @@
 import logging
 from pathlib import Path
 
-from .formatter import UnknownMemberError, build_content, build_title
+from .formatter import (UnknownMemberError, WeverseEntry, build_content, build_title, build_weverse_comment,
+                        build_weverse_content, build_weverse_title, weverse_day, weverse_member_name)
 from .state import load_seen, save_seen
 from .translator import TranslationError
 
@@ -77,3 +78,65 @@ def run(*, fetch, translate, post, state_path: Path, do_post: bool,
         save_seen(state_path, seen)
         posted += 1
     return posted
+
+
+def run_daily(*, fetch, translate, post, comment, find_post, state_path: Path, do_post: bool, notify=None) -> int:
+    """Weverse: one PTT post per Taipei day. Returns the number of lives published.
+
+    The first live of a day becomes the post (or is added to a post already on the board, e.g. a
+    hand-made one); later lives of that day are added as comments on it. A live is marked seen
+    only after it was published; find_post(title) -> aid | None, comment(aid, text).
+    """
+    notify = notify or (lambda text: None)
+    lives = fetch()
+    seen = load_seen(state_path)
+    if seen is None:
+        save_seen(state_path, {v.id for v in lives})
+        log.info("first run: marked %d existing lives as seen, nothing posted", len(lives))
+        return 0
+
+    days: dict[str, list[WeverseEntry]] = {}
+    for live in sorted((v for v in lives if v.id not in seen), key=lambda v: v.published):
+        try:
+            name = weverse_member_name(live)
+        except UnknownMemberError as e:
+            log.error("skipping %s: %s", live.id, e)
+            if do_post:
+                notify(f"[ptt-agent] {e}; skipping {live.id} until it is added")
+            continue
+        try:
+            translation = _translate_with_retry(translate, live.title)
+        except TranslationError:
+            log.exception("giving up on %s after %d attempts", live.id, TRANSLATE_RETRIES + 1)
+            if do_post:
+                notify(f"[ptt-agent] translation failed, skipped for good: {live.id} {live.title}")
+                seen.add(live.id)
+                save_seen(state_path, seen)
+            continue
+        days.setdefault(weverse_day(live), []).append(WeverseEntry(live, name, translation))
+
+    published = 0
+    for day, entries in days.items():
+        title = build_weverse_title(day)
+        if not do_post:
+            print(f"[dry-run] {title}\n  content: {build_weverse_content(entries)}")
+            continue
+        try:
+            aid = find_post(title)
+        except Exception:
+            log.exception("post lookup failed for %s, will retry next run", title)
+            notify(f"[ptt-agent] post lookup failed for {title}, retrying next run")
+            continue
+        batches = [entries] if aid is None else [[e] for e in entries]
+        for batch in batches:
+            try:
+                (post(title, build_weverse_content(batch)) if aid is None
+                 else comment(aid, build_weverse_comment(batch[0])))
+            except Exception:
+                log.exception("publishing %s failed, will retry next run", title)
+                notify(f"[ptt-agent] post failed for {title}, retrying next run")
+                break
+            seen.update(e.live.id for e in batch)
+            save_seen(state_path, seen)
+            published += len(batch)
+    return published

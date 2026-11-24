@@ -2,7 +2,7 @@
 
 Watch the LE SSERAFIM YouTube channel (and Weverse lives); for each new item, translate the title with the `/ls` skill (via `agy`) and post it to a PTT board.
 
-Flow: `youtube.fetch_videos` → `pipeline.run` → `translator.translate_title` → `formatter` → `ptt.PttPoster` (Weverse: `--source weverse`, `weverse.fetch_lives` instead of youtube).
+Flow: `youtube.fetch_videos` → `pipeline.run` → `translator.translate_title` → `formatter` → `ptt.PttPoster` (Weverse: `--source weverse`, `weverse.fetch_lives` → `pipeline.run_daily`, one post per day, later lives as comments).
 
 ## Docs (read when relevant)
 - `docs/pipeline.md`: translator output contract, state/seen semantics, hand-post guard, failure handling, PTT title limits, Telegram notifications
