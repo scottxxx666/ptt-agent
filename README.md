@@ -109,6 +109,31 @@ eval "$EXEC" -p Environment=PTT_PROXY=socks5h://127.0.0.1:40000 $KR uv run --fro
 
 啟用前（**會發到正式看板**）：先停 Mac 的 launchd（`launchctl bootout gui/$(id -u)/com.ptt-agent`）、把 Mac 的 `state.json` 複製到 `/opt/ptt-agent/state.json`（`chown ptt-agent`），再 `sudo systemctl enable --now ptt-agent.timer`。Weverse 不用搬 state：先確認 token 可用（見上），再 `sudo systemctl enable --now ptt-agent-weverse.timer && sudo systemctl start ptt-agent-weverse.service`，第一輪會建立 `/opt/ptt-agent/state.weverse.json` 並把現有 LIVE 記成已看過，log 出現 `first run` 就是對的。這一輪之前出現的 LIVE 不會發，所以避開直播時段。Mac 和 VM 不可同時啟用。
 
+### 查看執行狀態與 log
+
+在 VM 上用有 sudo 的帳號執行（不是 `ptt-agent`）。兩組 unit：`ptt-agent`（YouTube）和 `ptt-agent-weverse`。
+
+```bash
+# 排程：NEXT 是下次、LAST 是上次觸發時間；未啟用的 timer 這兩欄是 n/a
+systemctl list-timers 'ptt-agent*' --no-pager
+systemctl is-enabled ptt-agent.timer ptt-agent-weverse.timer
+
+# 上一輪結果：oneshot 跑完是 inactive (dead)，要看 status=0/SUCCESS 才算成功
+systemctl status ptt-agent.service ptt-agent-weverse.service --no-pager
+systemctl --failed --no-pager
+
+# log
+sudo journalctl -u ptt-agent-weverse.service -f              # 即時跟
+sudo journalctl -u ptt-agent.service -n 100 --no-pager
+sudo journalctl -u 'ptt-agent*' --since '1 hour ago' --no-pager   # 兩個一起
+
+# 手動跑一輪（會發到正式看板，只在確定要時用）
+sudo systemctl start ptt-agent-weverse.service
+
+# 資源：兩個 service 同時跑 agy 可能吃光 1 GB 記憶體
+free -m
+```
+
 ### 搬到新 VM
 
 新舊 VM 不要同時啟用 timer（會重複發文）。順序是先把新 VM 準備好但不啟用，最後才切換。
