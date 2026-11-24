@@ -12,7 +12,9 @@
 - The category (e.g. `[影音]`) is chosen by `title_index`, the menu number on that board, set via `PTT_TITLE_INDEX`. It differs per board.
 
 ## Notifications
-`notifier.notify` sends a Telegram message (`TELEGRAM_BOT_TOKEN`, `TELEGRAM_CHAT_ID` in `.env`; no-op if unset, never raises). Only with `--post`: on a crash (`__main__`), translation give-up, post failure, or duplicate-check failure (`pipeline`). Failures that retry next run notify again every run (no dedupe).
+`notifier.notify` sends a Telegram message (`TELEGRAM_BOT_TOKEN`, `TELEGRAM_CHAT_ID`; Mac: `.env`, VM: `/etc/ptt-agent.env`; no-op if unset, never raises). Only with `--post`: on a crash (`__main__`), translation give-up, post failure, duplicate-check failure or unknown member (`pipeline`). Failures that retry next run notify again every run (no dedupe). Applies to both sources (YouTube, Weverse). A Weverse token that is rejected, a 403 or a bad API response raises `WeverseError`, which is a crash notification.
+- Prefixes: the crash message names the source (`[ptt-agent:youtube]` / `[ptt-agent:weverse]`); the per-item messages from `pipeline` are just `[ptt-agent]`, so tell the source from the id and title in the text.
+- **Not covered** (the process dies or never starts, so `notify` never runs): OOM kill (`MemoryMax=500M`), `TimeoutStartSec` timeout, a unit that fails to start (bad unit file, broken `uv`/`.venv`, missing `/etc/ptt-agent.env`), a timer that is not enabled, and Telegram itself failing (logged as a warning only). On the VM check `systemctl --failed` and `journalctl` (README: "查看執行狀態與 log"). `OnFailure=` on the units would cover the first three; not done.
 
 ## Schedule (launchd)
 `~/Library/LaunchAgents/com.ptt-agent.plist` runs the job every 900s (commands in README.md). `StartInterval` does not fire at load; use `kickstart` to test (only if the user asks). launchd has a minimal PATH, so the plist adds `~/.local/bin` for `agy`. The plist sets `PTT_BOARD=LE_SSERAFIM`, `STATE_PATH=state.json`, `PTT_TITLE_INDEX=1`; these override `.env` because `load_dotenv` does not overwrite existing env vars.
