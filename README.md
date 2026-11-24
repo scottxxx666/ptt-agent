@@ -25,20 +25,20 @@ launchctl print gui/$(id -u)/com.ptt-agent
 
 ## Weverse LIVE
 
-另一個排程 `~/Library/LaunchAgents/com.ptt-agent.weverse.plist`（每 15 分鐘，日誌 `run.weverse.log`），指令同上，把 `com.ptt-agent` 換成 `com.ptt-agent.weverse`。
+Weverse 只在 VM 上跑（`ptt-agent-weverse.timer`，每 15 分鐘，安裝見下方「Linux」），Mac 沒有排程。
 LIVE 結束後（出現在回放列表）才會發文，標題 `[影音] YYMMDD weverse live 成員名`。
 
 ```bash
 uv run python -m ptt_agent --source weverse       # dry-run
 ```
 
-**Weverse token**：直接打 API，不用瀏覽器。在已登入的 Chrome 開發者工具（Application → Cookies → `https://weverse.io`）點 `we2_refresh_token` 複製值，**複製完再**執行（值不會進 shell history）。refresh token 每次 refresh 都會輪替，程式會自動寫回檔案；只有過期（log 出現 `refresh token rejected`）或被登出時才要重做。
+**Weverse token**：直接打 API，不用瀏覽器。下面只是本機 dry-run 用的（VM 的 token 另外放，見下方）。在已登入的 Chrome 開發者工具（Application → Cookies → `https://weverse.io`）點 `we2_refresh_token` 複製值，**複製完再**執行（值不會進 shell history）。refresh token 每次 refresh 都會輪替，程式會自動寫回檔案；只有過期（log 出現 `refresh token rejected`）或被登出時才要重做。
 
 ```bash
 python3 -c 'import json,subprocess;print(json.dumps({"refresh_token":subprocess.check_output("pbpaste",text=True).strip()}))' > .weverse-token.json && chmod 600 .weverse-token.json
 ```
 
-- 第一次啟用只會把現有 LIVE 記成已看過，不發文。
+- state 檔不存在時（第一次執行）只會把現有 LIVE 記成已看過，不發文。
 - 新成員／改名對不到 `formatter.MEMBER_ZH` 時會略過並在 log 報錯。
 
 ## 切換看板
@@ -107,7 +107,7 @@ eval "$EXEC" -p Environment=PTT_PROXY=socks5h://127.0.0.1:40000 $KR uv run --fro
 
 登入過期時（log 或 Telegram 出現翻譯失敗），重跑 a。
 
-啟用前（**會發到正式看板**）：先停 Mac 的 launchd（`launchctl bootout gui/$(id -u)/com.ptt-agent`）、把 Mac 的 `state.json` 複製到 `/opt/ptt-agent/state.json`（`chown ptt-agent`），再 `sudo systemctl enable --now ptt-agent.timer`。Weverse 同理：停 `com.ptt-agent.weverse`、把 `state.weverse.json` 複製到 `/opt/ptt-agent/state.weverse.json`，再 `sudo systemctl enable --now ptt-agent-weverse.timer`。Mac 和 VM 不可同時啟用。
+啟用前（**會發到正式看板**）：先停 Mac 的 launchd（`launchctl bootout gui/$(id -u)/com.ptt-agent`）、把 Mac 的 `state.json` 複製到 `/opt/ptt-agent/state.json`（`chown ptt-agent`），再 `sudo systemctl enable --now ptt-agent.timer`。Weverse 不用搬 state：先確認 token 可用（見上），再 `sudo systemctl enable --now ptt-agent-weverse.timer && sudo systemctl start ptt-agent-weverse.service`，第一輪會建立 `/opt/ptt-agent/state.weverse.json` 並把現有 LIVE 記成已看過，log 出現 `first run` 就是對的。這一輪之前出現的 LIVE 不會發，所以避開直播時段。Mac 和 VM 不可同時啟用。
 
 ### 搬到新 VM
 
