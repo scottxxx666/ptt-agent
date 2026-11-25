@@ -154,9 +154,12 @@ class Api:
     def get_post(self, board, aid=None, query=False):
         import PyPtt
         self.calls.append(("get_post", board, aid, query))
-        content = "\n".join(self.term.saved or self.term.file).replace(ESC, "")
+        lines = self.term.saved or self.term.file
+        content = "\n".join(lines).replace(ESC, "")
+        # Like PyPtt: query=True gives the board-list title, a full read parses the header row.
+        title = self.term.title if query else lines[1][len("標題: "):]
         return {PyPtt.PostField.post_status: PyPtt.PostStatus.EXISTS, PyPtt.PostField.author: self.author,
-                PyPtt.PostField.title: self.term.title, PyPtt.PostField.content: content}
+                PyPtt.PostField.title: title, PyPtt.PostField.content: content}
 
 
 @pytest.fixture(autouse=True)
@@ -172,7 +175,7 @@ NEW_ROWS = ["*[1;33m新的第一行*[m", "", "新的 https://youtu.be/x"]
 def test_parse_editor_on_the_recon_screen():
     term = Term()
     term.key("E")
-    ed = parse_editor(term.render(), "me", "Test", "[測試] edit me")
+    ed = parse_editor(term.render(), "me", "Test")
     assert ed.body == ["*[1;33m第一行黃色*[m", "", "第三行 https://youtu.be/v1VHwNp1LOo", "第四行", "第五行", ""]
     assert ed.footer == FOOTER[:3] and ed.cursor == (1, 1)
 
@@ -180,7 +183,7 @@ def test_parse_editor_on_the_recon_screen():
 def test_parse_editor_rejects_wrong_author_board_title_and_missing_signature():
     term = Term()
     term.key("E")
-    for kw in (dict(ptt_id="other"), dict(board="Gossiping"), dict(title="another")):
+    for kw in (dict(ptt_id="other"), dict(board="Gossiping")):
         with pytest.raises(EditError):
             parse_editor(term.render(), **kw)
     long = Term(file=HEADER + [f"line {i}" for i in range(30)] + FOOTER)
@@ -228,7 +231,7 @@ def test_save_replaces_only_the_body():
                           + ["※ 編輯: me (1.2.3.4 美國), 11/26/2026 00:22:36", ""])
     assert term.submitted == ["s"]
     assert term.state == "board" and not term.closed
-    assert api.calls[-1][:3] == ("get_post", "Test", "1h1mXoQL")  # read back
+    assert api.calls[-2:] == [("get_post", "Test", "1h1mXoQL", False), ("get_post", "Test", "1h1mXoQL", True)]
 
 
 def test_save_through_any_key_page():
@@ -347,18 +350,30 @@ def test_editing_again_keeps_earlier_edit_lines_and_adds_one():
     assert term.saved[6:9] == FOOTER[:3]
 
 
-def test_title_read_back_mismatch_is_reported(caplog, monkeypatch):
+def test_title_read_back_uses_the_list_title_and_reports_a_mismatch(caplog):
     term = Term()
     api = Api(term)
-    monkeypatch.setattr(term, "title", "[測試] edit me")
-    real = api.get_post
-
-    def stale_title(board, aid=None, query=False):
-        post = real(board, aid=aid, query=query)
-        if not query:
-            post[api.post_fields.title] = "[測試] edit me"
-        return post
-    api.get_post = stale_title
     with caplog.at_level(logging.WARNING, logger="ptt_agent"):
         edit_post(api, "Test", "1h1mXoQL", "x", title="[測試] new", save=True)
-    assert term.saved_title == "[測試] new" and "its title is" in caplog.text
+    assert "list title" not in caplog.text  # header row still says the old title; that is expected
+    real = api.get_post
+
+    def stale_after_save(board, aid=None, query=False):
+        post = real(board, aid, query)
+        if query and term.saved[4] == "y":  # only the read-back of the second edit
+            post[api.post_fields.title] = "stale"
+        return post
+    api.get_post = stale_after_save
+    with caplog.at_level(logging.WARNING, logger="ptt_agent"):
+        edit_post(api, "Test", "1h1mXoQL", "y", title="[測試] newer", save=True)
+    assert "its list title is 'stale'" in caplog.text
+
+
+def test_renamed_post_header_keeps_old_title_and_can_be_edited_and_renamed_again():
+    term = Term()
+    edit_post(Api(term), "Test", "1h1mXoQL", "x", title="[測試] renamed", save=True)
+    assert term.title == "[測試] renamed" and term.saved[1] == HEADER[1]  # (T) leaves the header row alone
+    assert edit_post(Api(term), "Test", "1h1mXoQL", None).split("\n")[1] == HEADER[1]  # dump still works
+    edit_post(Api(term), "Test", "1h1mXoQL", "y", title="[測試] again", save=True)
+    assert term.title == "[測試] again" and term.saved[4] == "y" and term.saved[:4] == HEADER
+    assert sum(r.startswith("※ 編輯:") for r in term.saved) == 2

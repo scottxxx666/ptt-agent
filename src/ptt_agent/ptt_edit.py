@@ -70,9 +70,11 @@ def _rows(screen: str) -> list[str]:
     return rows
 
 
-def parse_editor(screen: str, ptt_id: str | None = None, board: str | None = None,
-                 title: str | None = None) -> EditorScreen:
-    """Recognise the editor of an article; raise EditError on any unexpected layout."""
+def parse_editor(screen: str, ptt_id: str | None = None, board: str | None = None) -> EditorScreen:
+    """Recognise the editor of an article; raise EditError on any unexpected layout.
+
+    The 標題: row is not compared with the post's title: (T)改標題 only changes the board-list title,
+    the article header keeps the title the post was made with."""
     lines = _rows(screen)
     if not lines or EDITOR_STATUS not in lines[-1]:
         raise EditError("not in the article editor (no 編輯文章 status bar)")
@@ -87,8 +89,6 @@ def parse_editor(screen: str, ptt_id: str | None = None, board: str | None = Non
         raise EditError(f"editor author is not {ptt_id}")
     if board and not re.search(rf"看板:\s*{re.escape(board)}\s*$", author, re.IGNORECASE):
         raise EditError(f"editor board is not {board}")
-    if title is not None and title_line[len("標題:"):].strip() != title.strip():
-        raise EditError("editor title does not match the post's title")
     sig_row = next((i for i in range(HEADER_ROWS, status_row - 1)
                     if lines[i] == "--" and lines[i + 1].startswith("※ 發信站:")), None)
     if sig_row is None:
@@ -281,8 +281,7 @@ class EditDriver:
                 self._disconnect("unknown screen after E")
             raise EditError("E did not open the editor")
         try:
-            before = self._redraw_editor(lambda s: parse_editor(
-                s, api.ptt_id, board, post.get(PyPtt.PostField.title)))
+            before = self._redraw_editor(lambda s: parse_editor(s, api.ptt_id, board))
         except EditError as e:
             self.abandon(str(e))
             raise
@@ -308,13 +307,17 @@ class EditDriver:
 
     def change_title(self, old: str, title: str, before: EditorScreen, body: list[str]) -> None:
         """From the verified editor: Ctrl+X, 't' Enter, then the 舊標題/新標題 prompt (prefilled with the
-        old title): Ctrl+Y, type, Enter, back in the editor. Each step is checked before the next key."""
+        old title): Ctrl+Y, type, Enter, back in the editor. Each step is checked before the next key.
+        `old` is the board-list title; after an earlier rename the header's 標題: row may differ, so
+        either is accepted as the prompt's old title."""
+        olds = {old, before.lines[1][len("標題:"):].strip()}
         if not self._to_menu():
             self._fail("Ctrl+X did not show the file menu")
         if self._answer_menu("t", [NEW_TITLE]) != 0:
             self._fail("no 新標題 prompt after (T)")
         rows = _rows(self.screen())
-        if title_field(self.screen()) != old or len(rows) < 2 or rows[-2] != OLD_TITLE + old:
+        if (title_field(self.screen()) not in olds or len(rows) < 2
+                or rows[-2][len(OLD_TITLE):] not in olds or not rows[-2].startswith(OLD_TITLE)):
             self._fail(f"title prompt does not show the old title {old!r}")
         self._send(CTRL_Y, [NEW_TITLE])
         if title_field(self.screen()) != "":
@@ -400,13 +403,14 @@ def _check_saved(api, board: str, aid: str, body: list[str], title: str | None =
     """Read the post back; the save already happened, so a mismatch is only reported."""
     import PyPtt
     try:
-        post = api.get_post(board, aid=aid)
+        text = api.get_post(board, aid=aid).get(PyPtt.PostField.content) or ""
+        # The list title (query=True); a full read parses the header row, which (T) does not change.
+        listed = (api.get_post(board, aid=aid, query=True).get(PyPtt.PostField.title) or "").strip()
     except Exception:
         log.warning("PTT edit: could not read #%s back", aid, exc_info=True)
         return
-    text = post.get(PyPtt.PostField.content) or ""
-    if title is not None and (post.get(PyPtt.PostField.title) or "").strip() != title:
-        log.warning("PTT edit: saved #%s but its title is %r, not %r", aid, post.get(PyPtt.PostField.title), title)
+    if title is not None and listed != title:
+        log.warning("PTT edit: saved #%s but its list title is %r, not %r", aid, listed, title)
     missing = [line for line in (_COLOR.sub("", b).strip() for b in body) if line and line not in text]
     if missing:
         log.warning("PTT edit: saved #%s but these lines are not in the post: %r", aid, missing)
