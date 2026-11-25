@@ -21,6 +21,8 @@ def main() -> None:
     parser.add_argument("--board", default="Test", help="board of the post to --edit (default: Test)")
     parser.add_argument("--content-file", type=Path, help="--edit: new body (UTF-8; Ctrl+U for color codes)")
     parser.add_argument("--title", help="--edit: new title")
+    parser.add_argument("--append", action="store_true",
+                        help="--edit: add --content-file above the '--' row instead of replacing the body")
     args = parser.parse_args()
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
     load_dotenv(PROJECT_ROOT / ".env")
@@ -41,7 +43,8 @@ def main() -> None:
         if args.source == "weverse":
             from .weverse import fetch_lives
             run_daily(fetch=fetch_lives, translate=translate_title, post=post,
-                      comment=poster.comment if poster else None,
+                      append=(lambda aid, content: poster.append(aid, content, save=True).verified)
+                      if poster else None,
                       find_post=poster.find_post_aid if poster else None,
                       state_path=state_path, do_post=args.post, notify=notify if args.post else None)
         else:
@@ -56,7 +59,19 @@ def main() -> None:
 
 def edit(args) -> None:
     """--edit AID: no --content-file -> print the editor screen; without --post -> type and verify the
-    new body, then abandon; with --post -> save. Always ends by abandoning unless saving."""
+    new body, then abandon; with --post -> save. Always ends by abandoning unless saving.
+    --append: the same, but adds the file above '--' (no --content-file: print the screen at '--')."""
+    if args.append:
+        if args.title is not None:
+            raise SystemExit("--append does not change the title")
+        content = args.content_file.read_text(encoding="utf-8") if args.content_file else None
+        poster = PttPoster(os.environ["PTT_ID"], os.environ["PTT_PW"], board=args.board, title_index=1,
+                           proxy=os.environ.get("PTT_PROXY") or None)
+        result = poster.append(args.edit, content, save=args.post)
+        print(result.screen)
+        if result.saved:
+            print("saved; read-back " + ("OK" if result.verified else "MISMATCH (see the warning above)"))
+        return
     if args.title is not None and args.content_file is None:
         raise SystemExit("--title needs --content-file (the body is always replaced)")
     content = args.content_file.read_text(encoding="utf-8") if args.content_file else None

@@ -1,14 +1,14 @@
 import logging
 from pathlib import Path
 
-from .formatter import (UnknownMemberError, WeverseEntry, build_content, build_title, build_weverse_comment,
-                        build_weverse_content, build_weverse_title, weverse_day, weverse_member_name)
+from .formatter import (UnknownMemberError, WeverseEntry, build_content, build_title, build_weverse_content, build_weverse_title, weverse_day, weverse_member_name)
 from .state import load_seen, save_seen
 from .translator import TranslationError
 
 log = logging.getLogger("ptt_agent")
 
 TRANSLATE_RETRIES = 2
+APPEND_BATCH = 4  # lives per append edit: 4 rows each must fit on one editor screen (ptt_edit.MAX_APPEND_ROWS)
 
 
 def _translate_with_retry(translate, title: str):
@@ -80,12 +80,16 @@ def run(*, fetch, translate, post, state_path: Path, do_post: bool,
     return posted
 
 
-def run_daily(*, fetch, translate, post, comment, find_post, state_path: Path, do_post: bool, notify=None) -> int:
+def run_daily(*, fetch, translate, post, append, find_post, state_path: Path, do_post: bool, notify=None) -> int:
     """Weverse: one PTT post per Taipei day. Returns the number of lives published.
 
     The first live of a day becomes the post (or is added to a post already on the board, e.g. a
-    hand-made one); later lives of that day are added as comments on it. A live is marked seen
-    only after it was published; find_post(title) -> aid | None, comment(aid, text).
+    hand-made one); later lives of that day are appended to its body, above '--', in the same format.
+    A live is marked seen only after it was published. find_post(title) -> aid | None;
+    append(aid, make_content) -> bool, where make_content(current body text) -> text to append: lives
+    whose URL is already a line of the body are left out, so a retry after an uncertain save does not
+    add them twice. append returns False when it saved but the read-back did not match (notified;
+    the lives count as published).
     """
     notify = notify or (lambda text: None)
     lives = fetch()
@@ -127,11 +131,15 @@ def run_daily(*, fetch, translate, post, comment, find_post, state_path: Path, d
             log.exception("post lookup failed for %s, will retry next run", title)
             notify(f"[ptt-agent] post lookup failed for {title}, retrying next run")
             continue
-        batches = [entries] if aid is None else [[e] for e in entries]
+        batches = [entries] if aid is None else [entries[i:i + APPEND_BATCH]
+                                                  for i in range(0, len(entries), APPEND_BATCH)]
         for batch in batches:
             try:
-                (post(title, build_weverse_content(batch)) if aid is None
-                 else comment(aid, build_weverse_comment(batch[0])))
+                if aid is None:
+                    post(title, build_weverse_content(batch))
+                elif not append(aid, _missing_lives(batch)):
+                    notify(f"[ptt-agent] appended to {title} but the post does not read back as expected; "
+                           "check it by hand")
             except Exception:
                 log.exception("publishing %s failed, will retry next run", title)
                 notify(f"[ptt-agent] post failed for {title}, retrying next run")
@@ -140,3 +148,10 @@ def run_daily(*, fetch, translate, post, comment, find_post, state_path: Path, d
             save_seen(state_path, seen)
             published += len(batch)
     return published
+
+
+def _missing_lives(batch: list[WeverseEntry]):
+    def make(body: str) -> str:
+        lines = {line.strip() for line in body.split("\n")}
+        return build_weverse_content([e for e in batch if e.live.url not in lines])
+    return make

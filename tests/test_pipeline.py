@@ -202,16 +202,20 @@ def mk(id, author="HUH YUNJIN", published="2026-11-18T09:00:00+00:00"):
 
 
 class Board:
-    def __init__(self, aid=None, fail_comment=False):
-        self.aid, self.posts, self.comments, self.fail_comment = aid, [], [], fail_comment
+    def __init__(self, aid=None, fail_append=False, body="", readback_ok=True):
+        self.aid, self.posts, self.appends, self.fail_append = aid, [], [], fail_append
+        self.body, self.readback_ok = body, readback_ok
 
     def post(self, title, content):
         self.posts.append((title, content))
 
-    def comment(self, aid, text):
-        if self.fail_comment:
-            raise RuntimeError("push failed")
-        self.comments.append((aid, text))
+    def append(self, aid, make_content):
+        if self.fail_append:
+            raise RuntimeError("edit failed")
+        text = make_content(self.body)
+        self.appends.append((aid, text))
+        self.body += text
+        return self.readback_ok
 
     def find_post(self, title):
         self.looked_up = title
@@ -219,7 +223,7 @@ class Board:
 
 
 def go_daily(lives, state, board, translate=translate_ok, do_post=True, notify=None):
-    return run_daily(fetch=lambda: lives, translate=translate, post=board.post, comment=board.comment,
+    return run_daily(fetch=lambda: lives, translate=translate, post=board.post, append=board.append,
                      find_post=board.find_post, state_path=state, do_post=do_post, notify=notify)
 
 
@@ -237,7 +241,7 @@ def test_daily_merges_same_day_lives_into_one_post(tmp_path):
     (title, content), = board.posts
     assert title == "261118 weverse live" and board.looked_up == title
     assert content.index("譯:Ta") < content.index("譯:Tb")
-    assert "允真" in content and "SAKURA" in content and board.comments == []
+    assert "允真" in content and "SAKURA" in content and board.appends == []
     assert load_seen(state) == {"a", "b"}
 
 
@@ -249,17 +253,42 @@ def test_daily_posts_one_post_per_day(tmp_path):
     assert [t for t, _ in board.posts] == ["261118 weverse live", "261119 weverse live"]
 
 
-def test_daily_comments_on_the_existing_post_instead_of_posting(tmp_path):
+def test_daily_appends_to_the_existing_post_instead_of_posting(tmp_path):
     state, board = tmp_path / "s.json", Board(aid="AID1")
     save_seen(state, set())
     assert go_daily([mk("a"), mk("b", "SAKURA")], state, board) == 2
-    assert board.posts == [] and [a for a, _ in board.comments] == ["AID1", "AID1"]
-    assert board.comments[0][1] == "譯:Ta 允真\nhttps://weverse.io/lesserafim/live/a"
+    assert board.posts == [] and board.appends == [("AID1", (
+        "\x15[1;33m譯:Ta\x15[m \x15[1;36m允真\x15[m\n\nhttps://weverse.io/lesserafim/live/a\n\n"
+        "\x15[1;33m譯:Tb\x15[m \x15[1;36mSAKURA\x15[m\n\nhttps://weverse.io/lesserafim/live/b\n"))]
     assert load_seen(state) == {"a", "b"}
 
 
-def test_daily_failed_comment_stays_unseen_and_notifies(tmp_path):
-    state, board, msgs = tmp_path / "s.json", Board(aid="AID1", fail_comment=True), []
+def test_daily_appends_in_batches_that_fit_one_screen(tmp_path):
+    state, board = tmp_path / "s.json", Board(aid="AID1")
+    save_seen(state, set())
+    lives = [mk(str(i), published=f"2026-11-18T0{i}:00:00+00:00") for i in range(6)]
+    assert go_daily(lives, state, board) == 6
+    assert [t.count("weverse.io") for _, t in board.appends] == [4, 2]
+
+
+def test_daily_append_skips_lives_already_in_the_body(tmp_path):
+    # e.g. the previous run saved but then failed before marking them seen
+    state, board = tmp_path / "s.json", Board(aid="AID1", body="x\n\nhttps://weverse.io/lesserafim/live/a\n")
+    save_seen(state, set())
+    assert go_daily([mk("a"), mk("b")], state, board) == 2
+    (_, text), = board.appends
+    assert "live/a" not in text and "live/b" in text and load_seen(state) == {"a", "b"}
+
+
+def test_daily_append_saved_but_not_reading_back_notifies_and_marks_seen(tmp_path):
+    state, board, msgs = tmp_path / "s.json", Board(aid="AID1", readback_ok=False), []
+    save_seen(state, set())
+    assert go_daily([mk("a")], state, board, notify=msgs.append) == 1
+    assert load_seen(state) == {"a"} and len(msgs) == 1 and "by hand" in msgs[0]
+
+
+def test_daily_failed_append_stays_unseen_and_notifies(tmp_path):
+    state, board, msgs = tmp_path / "s.json", Board(aid="AID1", fail_append=True), []
     save_seen(state, set())
     assert go_daily([mk("a")], state, board, notify=msgs.append) == 0
     assert load_seen(state) == set() and len(msgs) == 1 and "retrying" in msgs[0]
@@ -295,4 +324,4 @@ def test_daily_dry_run_prints_and_touches_nothing(tmp_path, capsys):
     save_seen(state, set())
     assert go_daily([mk("a")], state, board, do_post=False) == 0
     assert "261118 weverse live" in capsys.readouterr().out
-    assert board.posts == board.comments == [] and load_seen(state) == set()
+    assert board.posts == board.appends == [] and load_seen(state) == set()

@@ -43,7 +43,7 @@ def test_live_requires_explicit_env(monkeypatch):
 def test_weverse_source_uses_its_own_default_state_and_daily_runner(monkeypatch):
     c = run_cli(monkeypatch, ["--source", "weverse"])
     assert c["state_path"].name == "state.weverse.dev.json"
-    assert c["comment"] is None and c["find_post"] is None
+    assert c["append"] is None and c["find_post"] is None
     assert c["do_post"] is False
 
 
@@ -83,6 +83,11 @@ def run_edit(monkeypatch, tmp_path, argv, env=()):
         def edit(self, aid, content, **kw):
             captured["edit"] = (aid, content, kw)
             return "screen"
+
+        def append(self, aid, content, **kw):
+            from ptt_agent.ptt_edit import AppendResult
+            captured["append"] = (aid, content, kw)
+            return AppendResult("screen", saved=kw["save"])
     (tmp_path / "body.txt").write_text("\x15[1;33m黃\x15[m\n", encoding="utf-8")
     monkeypatch.setattr(cli, "load_dotenv", lambda *a, **k: None)
     monkeypatch.setattr(cli, "run", lambda **kw: captured.update(ran=True))
@@ -109,3 +114,44 @@ def test_edit_saves_only_with_post_and_dumps_without_content(monkeypatch, tmp_pa
     assert c["edit"][2] == dict(title="[測試] t", save=True)
     c = run_edit(monkeypatch, tmp_path, ["--edit", "1h1mXoQL"])
     assert c["edit"] == ("1h1mXoQL", None, dict(title=None, save=False))
+
+
+def test_append_defaults_to_test_board_rehearsal_and_dump(monkeypatch, tmp_path, capsys):
+    c = run_edit(monkeypatch, tmp_path, ["--edit", "1h1nE93B", "--append", "--content-file", "BODY"],
+                 env=[("PTT_BOARD", "LE_SSERAFIM")])
+    assert c["poster"][1]["board"] == "Test" and "edit" not in c and "ran" not in c
+    assert c["append"] == ("1h1nE93B", "\x15[1;33m黃\x15[m\n", dict(save=False))
+    c = run_edit(monkeypatch, tmp_path, ["--edit", "1h1nE93B", "--append"])
+    assert c["append"] == ("1h1nE93B", None, dict(save=False))
+    c = run_edit(monkeypatch, tmp_path, ["--edit", "1h1nE93B", "--append", "--content-file", "BODY", "--post"])
+    assert c["append"][2] == dict(save=True) and "read-back OK" in capsys.readouterr().out
+
+
+def test_append_refuses_title(monkeypatch, tmp_path):
+    import pytest
+    with pytest.raises(SystemExit):
+        run_edit(monkeypatch, tmp_path, ["--edit", "1h1nE93B", "--append", "--content-file", "BODY", "--title", "x"])
+
+
+def test_weverse_post_wires_append_with_save(monkeypatch):
+    from ptt_agent.ptt_edit import AppendResult
+    calls = []
+
+    class P:
+        post = comment = find_post_aid = None
+
+        def __init__(self, *a, **kw):
+            pass
+
+        def append(self, aid, content, **kw):
+            calls.append((aid, content, kw))
+            return AppendResult("s", saved=True, verified=False)
+    captured = {}
+    monkeypatch.setattr(cli, "load_dotenv", lambda *a, **k: None)
+    monkeypatch.setattr(cli, "run_daily", lambda **kw: captured.update(kw))
+    monkeypatch.setattr(cli, "PttPoster", P)
+    monkeypatch.setenv("PTT_ID", "id")
+    monkeypatch.setenv("PTT_PW", "pw")
+    monkeypatch.setattr(sys, "argv", ["ptt_agent", "--source", "weverse", "--post"])
+    cli.main()
+    assert captured["append"]("AID", "text") is False and calls == [("AID", "text", dict(save=True))]

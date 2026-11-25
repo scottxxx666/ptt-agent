@@ -26,7 +26,7 @@ launchctl print gui/$(id -u)/com.ptt-agent
 ## Weverse LIVE
 
 Weverse 只在 VM 上跑（`ptt-agent-weverse.timer`，每 15 分鐘，安裝見下方「Linux」），Mac 沒有排程。
-LIVE 結束後（出現在回放列表）才會發文，同一天只發一篇，標題 `[影音] YYMMDD weverse live`；當天之後的直播以推文補在該篇底下（標題含 `YYMMDD weverse live` 的最近 10 篇自己的文章，手動發的也算）。
+LIVE 結束後（出現在回放列表）才會發文，同一天只發一篇，標題 `[影音] YYMMDD weverse live`；當天之後的直播以編輯文章的方式加在該篇內文最後（`--` 上方，格式與首播相同；該篇 = 標題含 `YYMMDD weverse live` 的最近 10 篇自己的文章，手動發的也算）。
 
 ```bash
 uv run python -m ptt_agent --source weverse       # dry-run
@@ -63,6 +63,7 @@ uv run pytest
 
 # 編輯自己的文章（預設 Test 板；不加 --post 只會打字驗證後放棄，不存檔）
 uv run python -m ptt_agent --edit <AID> [--board Test] --content-file body.txt [--title "..."] [--post]
+uv run python -m ptt_agent --edit <AID> --append [--content-file add.txt] [--post]   # 加在 -- 上方，不限長度
 ```
 
 帳密放在 `.env`（參考 `.env.example`）：`PTT_ID`、`PTT_PW`。

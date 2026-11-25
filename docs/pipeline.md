@@ -25,11 +25,23 @@ PyPtt has no edit API, so `ptt_edit` drives the editor through `api.connect_core
 - Board comes from `--board` (default `Test`), never from `PTT_BOARD`.
 - www.ptt.cc caches articles for a while after an edit; check with `--edit AID` (dump) instead.
 
+### Appending (`--edit AID --append`, `append_post`)
+Adds rows right above `--` on posts of any length (the Weverse job uses it for later lives). Never deletes a row; header and footer untouched; same verified file-menu answers as above.
+1. `get_post` (full) → `full_content` (reader text: 作者/標題/時間, `───` separator, body). The editor line of a row is its index there + 1 (editor: 3 header rows + blank, body from line 5). Exactly one `--` immediately followed by `※ 發信站:` is required, else refused before any key.
+2. Editor at `1:1` (header verified as for `--edit`; the footer may be off-screen). Down x L (L = `--` line) in sends of at most 20, the status bar checked to show the expected `N:  1` after each, so the cursor lands on `※ 發信站:` (L+1); then one Up. Recon: within the first 23 lines the view does not scroll, after that each Down scrolls by one with the cursor on content row 23, so the cursor is on screen row min(L+1, 23) - 1. Nothing is typed unless the status is `L:  1`, that row is `--`, the row below starts `※ 發信站:` and it is the only such pair on screen. A mismatch (e.g. the reader wrapped a long line, so its count is off) is abandoned and the screen logged.
+3. Type the rows + Enter each + one more Enter (a blank before `--`); if the body does not end with a blank row, one is typed first. Then Down, Up (so `※ 發信站:` is visible under the cursor) and verify: status `(L + typed + 1):  1`, one `--`/`※ 發信站:` pair on screen, the rows above it = old row above `--` + typed rows + blank, the rows from `--` on unchanged. At most 19 typed rows (all must be on one screen for this check).
+4. Save (verified `s`), then read back: body must be old body + new rows (colour codes removed) + blank. Mismatch = WARNING and `AppendResult.verified=False`; it is saved, never auto-fixed.
+- `content` may be a callable `body_text -> text` (the Weverse URL guard); `""` = nothing to append, no edit.
+- Without `--content-file`: dump = move to `--`, print that screen, abandon. Without `--post`: type + verify, then abandon.
+
 ```
 uv run python -m ptt_agent --edit 1h1mXoQL                                   # print the editor screen, abandon
 uv run python -m ptt_agent --edit 1h1mXoQL --content-file body.txt           # type + verify, then abandon
 uv run python -m ptt_agent --edit 1h1mXoQL --content-file body.txt --post    # save
 printf '\x15[1;33m黃色\x15[m\n\n第二段\n' > body.txt                           # color codes in a body file
+uv run python -m ptt_agent --edit 1h1nE93B --append                          # print the screen at '--', abandon
+uv run python -m ptt_agent --edit 1h1nE93B --append --content-file add.txt   # type + verify above '--', abandon
+uv run python -m ptt_agent --edit 1h1nE93B --append --content-file add.txt --post  # save + read back
 ```
 
 ## Notifications

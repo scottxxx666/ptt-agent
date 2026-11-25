@@ -82,9 +82,3 @@ def test_weverse_content_yellow_text_cyan_name_then_link_blocks_separated_by_bla
         "\x15[1;33m嗨～\x15[m \x15[1;36m允真\x15[m\n\nhttps://weverse.io/lesserafim/live/2-1\n"
         "\n"
         "\x15[1;33m全員直播\x15[m\n\nhttps://weverse.io/lesserafim/live/2-2\n")
-
-
-def test_weverse_comment_is_plain_text_and_drops_unencodable_chars():
-    from ptt_agent.formatter import WeverseEntry, build_weverse_comment
-    c = build_weverse_comment(WeverseEntry(live(), "允真", tr("嗨💙")))
-    assert c == "嗨 允真\nhttps://weverse.io/lesserafim/live/2-1" and "\x15" not in c

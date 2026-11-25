@@ -86,12 +86,8 @@ def weverse_day(live) -> str:
 
 
 def build_weverse_title(day: str) -> str:
-    """One post per Taipei day; also the key used to find that day's post for comments."""
+    """One post per Taipei day; also the key used to find that day's post to append to."""
     return f"{day} weverse live"
-
-
-def _weverse_text(e: WeverseEntry) -> str:
-    return " ".join(filter(None, (to_big5(e.translation.title_zh), e.name and to_big5(e.name))))
 
 
 def build_weverse_content(entries: list[WeverseEntry]) -> str:
@@ -102,11 +98,6 @@ def build_weverse_content(entries: list[WeverseEntry]) -> str:
             line += f" {CYAN}{to_big5(e.name)}{RESET}"
         blocks.append(f"{line}\n\n{e.live.url}\n")
     return "\n".join(blocks)
-
-
-def build_weverse_comment(e: WeverseEntry) -> str:
-    """PTT comments carry no colour; PyPtt splits long ones at the board's line width."""
-    return f"{_weverse_text(e)}\n{e.live.url}"
 
 
 def youtube_dup_key(video: Video) -> str:

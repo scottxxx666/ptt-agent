@@ -118,6 +118,18 @@ class PttPoster:
                 self._logout(api)
                 self._recent.clear()
 
+    def append(self, aid: str, content, save: bool = False):
+        """Add rows above the '--' of our post `aid` (any length); see ptt_edit.append_post."""
+        from .ptt_edit import append_post
+        with self._proxied():
+            api = self._api_factory() if self._api_factory else self._default_api()
+            api.login(ptt_id=self._id, ptt_pw=self._pw)
+            try:
+                return append_post(api, self._board, aid, content, save=save)
+            finally:
+                self._logout(api)
+                self._recent.clear()
+
     @staticmethod
     def _default_api():
         import PyPtt

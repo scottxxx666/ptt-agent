@@ -7,6 +7,11 @@ deleting it with Ctrl+Y line by line and typing the new body, so the header and 
 touched. Only articles whose header..※ 發信站 fit on the first screen are supported; longer ones are
 refused before any key that changes the text is sent.
 
+append_post adds rows right above "--" and works on posts of any length: the "--" line number is
+computed from the post text read beforehand, the cursor is moved there with verified Down keys, and
+nothing is typed unless the editor shows the cursor on that line with "--" under it and "※ 發信站:"
+below. Existing rows are never deleted.
+
 Safety: nothing is saved unless the editor screen after typing equals exactly what we expect
 (header unchanged, new body, blank line, the original footer incl. any "※ 編輯:" rows). Anything else
 in the editor or its file menu -> Ctrl+X, "a" Enter (abandon). The menu answer is a line-input field
@@ -20,7 +25,10 @@ from dataclasses import dataclass
 log = logging.getLogger("ptt_agent")
 
 CTRL_U, CTRL_X, CTRL_Y, ENTER = "\x15", "\x18", "\x19", "\r"
-DOWN = "\x1bOB"
+DOWN, UP = "\x1bOB", "\x1bOA"
+SIGN_START = "※ 發信站:"
+SEPARATOR = "───────────────────────────────────────"  # PyPtt screens.Target.content_start
+MOVE_CHUNK = 20  # Down keys per send while moving to the "--" row; the line is checked after each
 EDITOR_STATUS = "編輯文章"
 MENU_PROMPT = "確定要儲存檔案嗎？"  # Ctrl+X file menu; its answer is a line-input field
 OLD_TITLE, NEW_TITLE = "舊標題：", "新標題："
@@ -70,8 +78,10 @@ def _rows(screen: str) -> list[str]:
     return rows
 
 
-def parse_editor(screen: str, ptt_id: str | None = None, board: str | None = None) -> EditorScreen:
+def parse_editor(screen: str, ptt_id: str | None = None, board: str | None = None,
+                 need_sig: bool = True) -> EditorScreen:
     """Recognise the editor of an article; raise EditError on any unexpected layout.
+    need_sig=False accepts a first screen without the "--" row (sig_row is then -1).
 
     The 標題: row is not compared with the post's title: (T)改標題 only changes the board-list title,
     the article header keeps the title the post was made with."""
@@ -92,6 +102,8 @@ def parse_editor(screen: str, ptt_id: str | None = None, board: str | None = Non
     sig_row = next((i for i in range(HEADER_ROWS, status_row - 1)
                     if lines[i] == "--" and lines[i + 1].startswith("※ 發信站:")), None)
     if sig_row is None:
+        if not need_sig:
+            return EditorScreen(lines, status_row, -1)
         raise EditError("'--' + '※ 發信站:' not on the first screen (body longer than one screen?)")
     return EditorScreen(lines, status_row, sig_row)
 
@@ -255,7 +267,7 @@ class EditDriver:
             self._disconnect("not back on the board list after abandoning")
 
     # --- steps -----------------------------------------------------------------------------------
-    def open_editor(self, board: str, aid: str) -> tuple[EditorScreen, dict]:
+    def open_editor(self, board: str, aid: str, need_sig: bool = True) -> tuple[EditorScreen, dict]:
         api, PyPtt = self.api, self.PyPtt
         post = api.get_post(board, aid=aid, query=True)
         if post.get(PyPtt.PostField.post_status) != PyPtt.PostStatus.EXISTS:
@@ -281,7 +293,7 @@ class EditDriver:
                 self._disconnect("unknown screen after E")
             raise EditError("E did not open the editor")
         try:
-            before = self._redraw_editor(lambda s: parse_editor(s, api.ptt_id, board))
+            before = self._redraw_editor(lambda s: parse_editor(s, api.ptt_id, board, need_sig))
         except EditError as e:
             self.abandon(str(e))
             raise
@@ -414,3 +426,205 @@ def _check_saved(api, board: str, aid: str, body: list[str], title: str | None =
     missing = [line for line in (_COLOR.sub("", b).strip() for b in body) if line and line not in text]
     if missing:
         log.warning("PTT edit: saved #%s but these lines are not in the post: %r", aid, missing)
+
+
+# --- append (posts of any length) -----------------------------------------------------------------
+# Live recon (24-row screen): 23 content rows + status bar. The editor line number of a post row is its
+# index in get_post's full_content + 1 (reader: 3 header rows + ─── separator; editor: 3 + blank).
+# Down from 1:1 moves one line per key; within the first 23 lines the view does not scroll, after that
+# every Down scrolls by one and the cursor stays on the last content row.
+MAX_APPEND_ROWS = 19  # typed rows; with the row above, a blank, "--" and "※ 發信站:" that is 23 rows
+
+
+@dataclass
+class PostText:
+    sig_line: int    # editor line (1-based) of the "--" row
+    body: list[str]  # rendered body rows (no colour codes): editor lines 5 .. sig_line - 1
+
+
+@dataclass
+class AppendResult:
+    screen: str            # last verified editor screen ("" if nothing was appended)
+    saved: bool = False
+    verified: bool = True  # False: saved, but the read-back did not match (already saved; not fixed)
+
+
+def parse_post_text(full_content: str) -> PostText:
+    """Locate the '--' row in get_post's full_content (the reader's text)."""
+    lines = [r.rstrip() for r in (full_content or "").split("\n")]
+    if (len(lines) < HEADER_ROWS + 2 or "作者" not in lines[0] or "標題" not in lines[1]
+            or "時間" not in lines[2] or SEPARATOR not in lines[3]):
+        raise EditError("post text does not start with 作者/標題/時間/───; cannot count its lines")
+    hits = [i for i in range(HEADER_ROWS, len(lines) - 1)
+            if lines[i] == "--" and lines[i + 1].startswith(SIGN_START)]
+    if len(hits) != 1:
+        raise EditError(f"post text has {len(hits)} '--' + '※ 發信站:' rows, expected exactly 1")
+    return PostText(hits[0] + 1, lines[HEADER_ROWS:hits[0]])
+
+
+def parse_status(screen: str) -> EditorScreen:
+    """Any editor screen (the header may be scrolled away); sig_row is -1."""
+    lines = _rows(screen)
+    if not lines or EDITOR_STATUS not in lines[-1]:
+        raise EditError("not in the article editor (no 編輯文章 status bar)")
+    return EditorScreen(lines, len(lines) - 1, -1)
+
+
+def _sig_pairs(ed: EditorScreen) -> list[int]:
+    return [i for i in range(ed.status_row - 1) if ed.lines[i] == "--" and ed.lines[i + 1].startswith(SIGN_START)]
+
+
+def check_line(screen: str, line: int) -> EditorScreen:
+    ed = parse_status(screen)
+    if ed.cursor != (line, 1):
+        raise EditError(f"editor cursor at {ed.cursor}, expected ({line}, 1)")
+    return ed
+
+
+def check_at_sig(screen: str, line: int) -> EditorScreen:
+    """After Down x line (cursor on '※ 發信站:', line + 1) and one Up: the cursor is on line `line`, on
+    screen row min(line + 1, rows) - 1, which shows '--' with '※ 發信站:' right below it."""
+    ed = check_line(screen, line)
+    row = min(line + 1, ed.status_row) - 2
+    pairs = _sig_pairs(ed)
+    if pairs != [row]:
+        where = f"; '--' + '※ 發信站:' shown on screen row(s) {[p + 1 for p in pairs]}" if pairs else ""
+        raise EditError(f"cursor row {row + 1} (line {line}) is not '--' followed by '※ 發信站:'{where}"
+                        " (the post's line count from get_post differs from the editor's?)")
+    ed.sig_row = row
+    return ed
+
+
+def check_appended(at: EditorScreen, line: int, typed: list[str], screen: str) -> EditorScreen:
+    """After typing `typed` + a blank at the '--' row (line `line`), then Down and Up: the cursor is
+    on '--' (now line + len(typed) + 1), the rows above it on screen are the old row above '--', the
+    typed rows and a blank, and the rows from '--' on are the old ones."""
+    ed = check_line(screen, line + len(typed) + 1)
+    pairs = _sig_pairs(ed)
+    if len(pairs) != 1:
+        raise EditError(f"{len(pairs)} '--' + '※ 發信站:' rows on screen after typing, expected 1")
+    sig = pairs[0]
+    want = [at.lines[at.sig_row - 1]] + [displayed(t) for t in typed] + [""]
+    got = ed.lines[max(sig - len(want), 0):sig]
+    if got != want:
+        diff = [f"want {w!r} got {g!r}" for w, g in zip(want, [None] * (len(want) - len(got)) + got) if w != g]
+        raise EditError("rows above '--' are not the expected text: " + "; ".join(diff[:5]))
+    old_footer, new_footer = at.lines[at.sig_row:at.status_row], ed.lines[sig:ed.status_row]
+    k = min(len(old_footer), len(new_footer))
+    if old_footer[:k] != new_footer[:k]:
+        raise EditError(f"rows from '--' on changed: {old_footer[:k]!r} -> {new_footer[:k]!r}")
+    ed.sig_row = sig
+    return ed
+
+
+def _plain(line: str) -> str:
+    return _COLOR.sub("", line).rstrip()
+
+
+class AppendDriver(EditDriver):
+    def go_to_sig(self, line: int) -> EditorScreen:
+        """From the verified editor at 1:1: Down to line + 1 in checked chunks, then one Up."""
+        at = 1
+        try:
+            while at < line + 1:
+                step = min(MOVE_CHUNK, line + 1 - at)
+                self._send(DOWN * step, [EDITOR_STATUS])
+                at += step
+                self._redraw_editor(lambda s, at=at: check_line(s, at))
+            self._send(UP, [EDITOR_STATUS])
+            return self._redraw_editor(lambda s: check_at_sig(s, line))
+        except EditError as e:
+            self.abandon(str(e))
+            raise
+
+    def type_above_sig(self, at: EditorScreen, line: int, typed: list[str]) -> EditorScreen:
+        """Typing at column 1 of '--' inserts above it; each Enter pushes '--' down."""
+        keys = "".join(t + ENTER for t in typed) + ENTER
+        self._send(keys, [EDITOR_STATUS], timeout=self.api.config.screen_post_timeout)
+        self._send(DOWN, [EDITOR_STATUS])  # Down + Up: '※ 發信站:' is then visible below the cursor
+        self._send(UP, [EDITOR_STATUS])
+        try:
+            return self._redraw_editor(lambda s: check_appended(at, line, typed, s))
+        except EditError as e:
+            self.abandon(str(e))
+            raise
+
+
+def append_post(api, board: str, aid: str, content, save: bool = False) -> AppendResult:
+    """Add `content` as new rows right above the '--' row of our post `aid` (any length).
+
+    content: text, None (dump: move to '--', return that screen, abandon), or a callable that gets the
+    current body text (no colour codes) and returns the text to append ("" = nothing to do; no edit).
+    A blank row is added first if the body does not end with one, and one after the new rows, so the
+    layout matches formatter.build_weverse_content. save=False types and verifies, then abandons."""
+    aid = aid.lstrip("#")
+    if len(aid) != 8:
+        raise EditError(f"bad AID {aid!r}")
+    if content is not None and not callable(content):
+        normalize_content(content)  # refuse bad text before any network traffic
+    driver = AppendDriver(api)
+    try:
+        return _append(driver, api, board, aid, content, save)
+    except EditError:
+        raise
+    except BaseException:
+        if getattr(api, "_is_login", False) and not driver._in_board_list():
+            driver._disconnect("unexpected error")
+        raise
+
+
+def _append(driver: AppendDriver, api, board: str, aid: str, content, save: bool) -> AppendResult:
+    import PyPtt
+    post = api.get_post(board, aid=aid)
+    if post.get(PyPtt.PostField.post_status) != PyPtt.PostStatus.EXISTS:
+        raise EditError(f"post {aid} does not exist on {board}")
+    old = parse_post_text(post.get(PyPtt.PostField.full_content))
+    if callable(content):
+        content = content("\n".join(old.body))
+    new = normalize_content(content) if content is not None else None
+    if new == []:
+        log.info("PTT edit: nothing to append to #%s", aid)
+        return AppendResult("")
+    typed, pad = None, bool(old.body) and old.body[-1] != ""  # pad: a blank row first
+    if new is not None:
+        typed = [""] * pad + new
+        if len(typed) > MAX_APPEND_ROWS:
+            raise EditError(f"{len(typed)} rows to append, at most {MAX_APPEND_ROWS} (must fit on one screen)")
+    log.info("PTT edit: #%s '--' is at editor line %d", aid, old.sig_line)
+    driver.open_editor(board, aid, need_sig=False)
+    at = driver.go_to_sig(old.sig_line)
+    if typed is None:
+        driver.abandon("dump only", logging.INFO)
+        return AppendResult("\n".join(at.lines))
+    above = at.lines[at.sig_row - 1]
+    if (above != "") != pad:
+        why = f"row above '--' is {above!r}; the post text says {old.body[-1:]!r}"
+        driver.abandon(why)
+        raise EditError(why)
+    after = driver.type_above_sig(at, old.sig_line, typed)
+    shown = "\n".join(after.lines)
+    if not save:
+        driver.abandon("rehearsal (no --post), verified OK", logging.INFO)
+        return AppendResult(shown)
+    driver.save()
+    log.info("PTT edit: appended %d rows to #%s on %s", len(typed) + 1, aid, board)
+    return AppendResult(shown, saved=True, verified=_check_append_saved(api, board, aid, old, typed))
+
+
+def _check_append_saved(api, board: str, aid: str, old: PostText, typed: list[str]) -> bool:
+    """Read the post back: body must be the old body + the new rows + a blank. Already saved, so a
+    mismatch is only reported, never fixed."""
+    import PyPtt
+    try:
+        got = parse_post_text(api.get_post(board, aid=aid).get(PyPtt.PostField.full_content)).body
+    except Exception:
+        log.warning("PTT edit: could not read #%s back after appending", aid, exc_info=True)
+        return False
+    want = old.body + [_plain(t) for t in typed] + [""]
+    if got != want:
+        diff = [f"line {i + 5}: want {w!r} got {g!r}" for i, (w, g) in
+                enumerate(zip(want + [None] * len(got), got + [None] * len(want))) if w != g]
+        log.warning("PTT edit: appended to #%s but the post body is not old body + new rows: %s",
+                    aid, "; ".join(diff[:5]))
+        return False
+    return True
