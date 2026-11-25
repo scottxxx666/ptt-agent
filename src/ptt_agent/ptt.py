@@ -106,6 +106,18 @@ class PttPoster:
             finally:
                 self._logout(api)
 
+    def edit(self, aid: str, content: str | None, title: str | None = None, save: bool = False) -> str:
+        """Replace the body (and optionally the title) of our post `aid`; see ptt_edit.edit_post."""
+        from .ptt_edit import edit_post
+        with self._proxied():
+            api = self._api_factory() if self._api_factory else self._default_api()
+            api.login(ptt_id=self._id, ptt_pw=self._pw)
+            try:
+                return edit_post(api, self._board, aid, content, title=title, save=save)
+            finally:
+                self._logout(api)
+                self._recent.clear()
+
     @staticmethod
     def _default_api():
         import PyPtt

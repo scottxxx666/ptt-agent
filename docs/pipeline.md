@@ -11,6 +11,23 @@
 - Title is max 44 Big5 bytes and must be Big5-encodable; `formatter` drops unencodable chars (emoji, math alphanumerics) and cuts to the limit.
 - The category (e.g. `[影音]`) is chosen by `title_index`, the menu number on that board, set via `PTT_TITLE_INDEX`. It differs per board.
 
+## Editing a post (`--edit`, `ptt_edit.py`)
+PyPtt has no edit API, so `ptt_edit` drives the editor through `api.connect_core.send`: `#AID` Enter, `E`, cursor down 4 rows to the body, Ctrl+Y per old body row, type the new body + a blank line above `--`, Ctrl+X, (T)改標題 if asked, `s` Enter.
+- Body region = rows between the blank row after 作者/標題/時間 and the `--` row followed by `※ 發信站:`. Header and footer are never touched.
+- Only posts whose header..`※ 發信站` fit on the first editor screen (and whose new body still fits) are supported; others are refused before any text-changing key.
+- Nothing is saved unless the redrawn editor equals exactly header + new body (ESC drawn as `*`) + blank + old footer, with the cursor at the start of `--`. Otherwise Ctrl+X, `a` Enter (abandon) and the screen is logged; a screen we cannot place -> disconnect (never saves).
+- Refuses posts not by `PTT_ID`, and editor headers whose author/board/title do not match the post.
+- Content: printable Big5 text, `\n`, and Ctrl+U (`\x15`) for color codes; any other control char is refused. Lines wider than the screen will fail verification (abandoned).
+- Board comes from `--board` (default `Test`), never from `PTT_BOARD`.
+- Not yet verified live: the screens after `s` Enter, the (T)改標題 prompt (assumed: Ctrl+Y clears it; the prompt is checked before Enter), and whether PTT appends `※ 編輯:`.
+
+```
+uv run python -m ptt_agent --edit 1h1mXoQL                                   # print the editor screen, abandon
+uv run python -m ptt_agent --edit 1h1mXoQL --content-file body.txt           # type + verify, then abandon
+uv run python -m ptt_agent --edit 1h1mXoQL --content-file body.txt --post    # save
+printf '\x15[1;33m黃色\x15[m\n\n第二段\n' > body.txt                           # color codes in a body file
+```
+
 ## Notifications
 `notifier.notify` sends a Telegram message (`TELEGRAM_BOT_TOKEN`, `TELEGRAM_CHAT_ID`; Mac: `.env`, VM: `/etc/ptt-agent.env`; no-op if unset, never raises). Only with `--post`: on a crash (`__main__`), translation give-up, post failure, duplicate-check or post-lookup failure or unknown member (`pipeline`). Failures that retry next run notify again every run (no dedupe). Applies to both sources (YouTube, Weverse). A Weverse token that is rejected, a 403 or a bad API response raises `WeverseError`, which is a crash notification.
 - Prefixes: the crash message names the source (`[ptt-agent:youtube]` / `[ptt-agent:weverse]`); the per-item messages from `pipeline` are just `[ptt-agent]`, so tell the source from the id and title in the text.

@@ -71,3 +71,41 @@ def test_proxy_defaults_to_none_and_comes_from_ptt_proxy(monkeypatch):
     assert kw["proxy"] == "socks5h://127.0.0.1:40000"
     _, kw = run_cli(monkeypatch, ["--post"], env=[("PTT_PROXY", "")])["poster"]
     assert kw["proxy"] is None
+
+
+def run_edit(monkeypatch, tmp_path, argv, env=()):
+    captured = {}
+
+    class P:
+        def __init__(self, *a, **kw):
+            captured["poster"] = (a, kw)
+
+        def edit(self, aid, content, **kw):
+            captured["edit"] = (aid, content, kw)
+            return "screen"
+    (tmp_path / "body.txt").write_text("\x15[1;33m黃\x15[m\n", encoding="utf-8")
+    monkeypatch.setattr(cli, "load_dotenv", lambda *a, **k: None)
+    monkeypatch.setattr(cli, "run", lambda **kw: captured.update(ran=True))
+    monkeypatch.setattr(cli, "PttPoster", P)
+    monkeypatch.setenv("PTT_ID", "id")
+    monkeypatch.setenv("PTT_PW", "pw")
+    for k, v in env:
+        monkeypatch.setenv(k, v)
+    monkeypatch.setattr(sys, "argv", ["ptt_agent", *[a.replace("BODY", str(tmp_path / "body.txt")) for a in argv]])
+    cli.main()
+    return captured
+
+
+def test_edit_defaults_to_test_board_even_with_live_env_and_does_not_save(monkeypatch, tmp_path):
+    c = run_edit(monkeypatch, tmp_path, ["--edit", "1h1mXoQL", "--content-file", "BODY"],
+                 env=[("PTT_BOARD", "LE_SSERAFIM")])
+    assert c["poster"][1]["board"] == "Test" and "ran" not in c
+    assert c["edit"] == ("1h1mXoQL", "\x15[1;33m黃\x15[m\n", dict(title=None, save=False))
+
+
+def test_edit_saves_only_with_post_and_dumps_without_content(monkeypatch, tmp_path):
+    c = run_edit(monkeypatch, tmp_path, ["--edit", "1h1mXoQL", "--board", "Test", "--content-file", "BODY",
+                                         "--title", "[測試] t", "--post"])
+    assert c["edit"][2] == dict(title="[測試] t", save=True)
+    c = run_edit(monkeypatch, tmp_path, ["--edit", "1h1mXoQL"])
+    assert c["edit"] == ("1h1mXoQL", None, dict(title=None, save=False))

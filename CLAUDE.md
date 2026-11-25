@@ -5,7 +5,7 @@ Watch the LE SSERAFIM YouTube channel (and Weverse lives); for each new item, tr
 Flow: `youtube.fetch_videos` → `pipeline.run` → `translator.translate_title` → `formatter` → `ptt.PttPoster` (Weverse: `--source weverse`, `weverse.fetch_lives` → `pipeline.run_daily`, one post per day, later lives as comments).
 
 ## Docs (read when relevant)
-- `docs/pipeline.md`: translator output contract, state/seen semantics, hand-post guard, failure handling, PTT title limits, Telegram notifications
+- `docs/pipeline.md`: translator output contract, state/seen semantics, hand-post guard, failure handling, PTT title limits, Telegram notifications, editing posts (`--edit`)
 - `docs/weverse.md`: Weverse API signing, token rotation, member mapping
 - `docs/known-limitations.md`: accepted review findings, not to be re-raised; add new ones there
 - `README.md`: setup and launchd enable/disable commands

@@ -60,6 +60,9 @@ uv sync --python 3.13
 uv run python -m ptt_agent          # dry-run：只印出，不發文
 uv run python -m ptt_agent --post   # 實際發文
 uv run pytest
+
+# 編輯自己的文章（預設 Test 板；不加 --post 只會打字驗證後放棄，不存檔）
+uv run python -m ptt_agent --edit <AID> [--board Test] --content-file body.txt [--title "..."] [--post]
 ```
 
 帳密放在 `.env`（參考 `.env.example`）：`PTT_ID`、`PTT_PW`。

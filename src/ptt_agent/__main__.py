@@ -17,9 +17,16 @@ def main() -> None:
     parser = argparse.ArgumentParser(prog="ptt_agent")
     parser.add_argument("--source", choices=["youtube", "weverse"], default="youtube")
     parser.add_argument("--post", action="store_true", help="actually post to PTT (default: dry-run)")
+    parser.add_argument("--edit", metavar="AID", help="edit our post AID instead of watching a source")
+    parser.add_argument("--board", default="Test", help="board of the post to --edit (default: Test)")
+    parser.add_argument("--content-file", type=Path, help="--edit: new body (UTF-8; Ctrl+U for color codes)")
+    parser.add_argument("--title", help="--edit: new title")
     args = parser.parse_args()
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
     load_dotenv(PROJECT_ROOT / ".env")
+    if args.edit:
+        edit(args)
+        return
 
     post, poster = None, None
     if args.post:
@@ -45,6 +52,18 @@ def main() -> None:
         if args.post:
             notify(f"[ptt-agent:{args.source}] crashed: {type(e).__name__}: {e}")
         raise
+
+
+def edit(args) -> None:
+    """--edit AID: no --content-file -> print the editor screen; without --post -> type and verify the
+    new body, then abandon; with --post -> save. Always ends by abandoning unless saving."""
+    if args.title is not None and args.content_file is None:
+        raise SystemExit("--title needs --content-file (the body is always replaced)")
+    content = args.content_file.read_text(encoding="utf-8") if args.content_file else None
+    # --board, not PTT_BOARD: an edit only goes to a live board when asked for on the command line.
+    poster = PttPoster(os.environ["PTT_ID"], os.environ["PTT_PW"], board=args.board, title_index=1,
+                       proxy=os.environ.get("PTT_PROXY") or None)
+    print(poster.edit(args.edit, content, title=args.title, save=args.post))
 
 
 if __name__ == "__main__":
