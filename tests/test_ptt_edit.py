@@ -169,10 +169,11 @@ class Api:
         self.calls.append(("get_post", board, aid, query))
         lines = self.term.saved or self.term.file
         content = "\n".join(lines).replace(ESC, "")
-        # The reader: header boxes and a ─── separator instead of the editor's blank row, colours rendered.
+        # The reader (live 1h1nE93B): header boxes, a ─── row, then the file from its blank line 4 on
+        # (so reader index == editor line), colours rendered.
         body = [re.sub(ESC + r"\[[0-9;]*m", "", r) for r in lines[4:]][max(-self.term.reader_extra, 0):]
-        reader = ([f" 作者  {lines[0][4:]}", f" 標題  {lines[1][4:]}", f" 時間  {lines[2][4:]}", "─" * 78]
-                  + ["(wrapped)"] * self.term.reader_extra + body)
+        reader = ([f" 作者  {lines[0][4:]}  看板  Test ", f" 標題  {lines[1][4:]} ", f" 時間  {lines[2][4:]} ",
+                   "─" * 39, lines[3]] + ["(wrapped)"] * self.term.reader_extra + body)
         # Like PyPtt: query=True gives the board-list title, a full read parses the header row.
         title = self.term.title if query else lines[1][len("標題: "):]
         return {PyPtt.PostField.post_status: PyPtt.PostStatus.EXISTS, PyPtt.PostField.author: self.author,
@@ -434,8 +435,25 @@ def test_parse_post_text_counts_editor_lines_like_the_recon_post():
     assert pt.sig_line == 33 and len(pt.body) == 28 and pt.body[0] == "測試直播第1場 采源"
     with pytest.raises(EditError, match="───"):
         parse_post_text("\n".join(HEADER + FOOTER))  # editor text, not the reader's
+    with pytest.raises(EditError, match="───/blank"):
+        parse_post_text(text.replace("─" * 39 + "\n\n", "─" * 39 + "\n"))  # no blank row after ───
     with pytest.raises(EditError, match="2 '--'"):
         parse_post_text(text.replace("live/7-100003", "x\n--\n※ 發信站: quoted"))
+
+
+def test_parse_post_text_on_the_live_full_content_shape():
+    # get_post(full_content) of 1h1nE93B on the VM: '--' at index 33 = editor line 33.
+    rows = [" 作者  me (高高高)                                        看板  Test ",
+            " 標題  [測試] append recon long                                               ",
+            " 時間  Thu Nov 26 00:57:43 2026                                               ",
+            "─" * 39, ""]
+    for i in range(1, 8):
+        rows += [f"測試直播第{i}場 采源", "", f"https://weverse.io/lesserafim/live/7-10000{i}", ""]
+    rows += ["--", "※ 發信站: 批踢踢實業坊(ptt.cc), 來自: 1.2.3.4 (美國)",
+             "※ 文章網址: https://www.ptt.cc/bbs/Test/M.1795625865.A.0CB.html"]
+    assert rows.index("--") == 33
+    pt = parse_post_text("\n".join(rows))
+    assert pt.sig_line == 33 and pt.body[0] == "測試直播第1場 采源" and pt.body[-1] == "" and len(pt.body) == 28
 
 
 @pytest.mark.parametrize("n", [1, 4, 5, 7, 12])

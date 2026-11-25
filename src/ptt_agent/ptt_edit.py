@@ -429,8 +429,9 @@ def _check_saved(api, board: str, aid: str, body: list[str], title: str | None =
 
 
 # --- append (posts of any length) -----------------------------------------------------------------
-# Live recon (24-row screen): 23 content rows + status bar. The editor line number of a post row is its
-# index in get_post's full_content + 1 (reader: 3 header rows + ─── separator; editor: 3 + blank).
+# Live recon (24-row screen): 23 content rows + status bar. The reader (get_post's full_content) shows the
+# 3 header rows as boxes, then a ─── separator row, then the file from its line 4 (the blank after the
+# header) on, so the editor line number of a reader row is its index (live: '--' at index 33 = line 33).
 # Down from 1:1 moves one line per key; within the first 23 lines the view does not scroll, after that
 # every Down scrolls by one and the cursor stays on the last content row.
 MAX_APPEND_ROWS = 19  # typed rows; with the row above, a blank, "--" and "※ 發信站:" that is 23 rows
@@ -450,16 +451,18 @@ class AppendResult:
 
 
 def parse_post_text(full_content: str) -> PostText:
-    """Locate the '--' row in get_post's full_content (the reader's text)."""
+    """Locate the '--' row in get_post's full_content (the reader's text): 作者/標題/時間, ───, the
+    blank file line 4, body from index 5 = editor line 5. Any other shape is refused (fail safe)."""
     lines = [r.rstrip() for r in (full_content or "").split("\n")]
-    if (len(lines) < HEADER_ROWS + 2 or "作者" not in lines[0] or "標題" not in lines[1]
-            or "時間" not in lines[2] or SEPARATOR not in lines[3]):
-        raise EditError("post text does not start with 作者/標題/時間/───; cannot count its lines")
-    hits = [i for i in range(HEADER_ROWS, len(lines) - 1)
+    body_start = HEADER_ROWS + 1
+    if (len(lines) < body_start + 2 or "作者" not in lines[0] or "標題" not in lines[1]
+            or "時間" not in lines[2] or SEPARATOR not in lines[3] or lines[4] != ""):
+        raise EditError("post text does not start with 作者/標題/時間/───/blank; cannot count its lines")
+    hits = [i for i in range(body_start, len(lines) - 1)
             if lines[i] == "--" and lines[i + 1].startswith(SIGN_START)]
     if len(hits) != 1:
         raise EditError(f"post text has {len(hits)} '--' + '※ 發信站:' rows, expected exactly 1")
-    return PostText(hits[0] + 1, lines[HEADER_ROWS:hits[0]])
+    return PostText(hits[0], lines[body_start:hits[0]])
 
 
 def parse_status(screen: str) -> EditorScreen:
