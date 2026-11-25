@@ -8,9 +8,10 @@ touched. Only articles whose header..※ 發信站 fit on the first screen are s
 refused before any key that changes the text is sent.
 
 Safety: nothing is saved unless the editor screen after typing equals exactly what we expect
-(header unchanged, new body, blank line, the original footer). Anything else in the editor or its
-file menu -> Ctrl+X, "a" Enter (abandon). A screen we cannot place at all -> disconnect, which never
-saves either.
+(header unchanged, new body, blank line, the original footer incl. any "※ 編輯:" rows). Anything else
+in the editor or its file menu -> Ctrl+X, "a" Enter (abandon). The menu answer is a line-input field
+where an unrecognised answer means SAVE, so Enter is only sent once the field shows exactly the
+intended letter. A screen we cannot place at all -> disconnect, which never saves either.
 """
 import logging
 import re
@@ -21,7 +22,8 @@ log = logging.getLogger("ptt_agent")
 CTRL_U, CTRL_X, CTRL_Y, ENTER = "\x15", "\x18", "\x19", "\r"
 DOWN = "\x1bOB"
 EDITOR_STATUS = "編輯文章"
-FILE_MENU = "確定要儲存檔案嗎"
+MENU_PROMPT = "確定要儲存檔案嗎？"  # Ctrl+X file menu; its answer is a line-input field
+OLD_TITLE, NEW_TITLE = "舊標題：", "新標題："
 ANY_KEY = "任意鍵"
 MAX_TITLE_BYTES = 44
 HEADER_ROWS = 4  # 作者 / 標題 / 時間 / blank
@@ -136,7 +138,7 @@ def replace_keys(before: EditorScreen, body: list[str]) -> str:
             + "".join(line + ENTER for line in body) + ENTER)
 
 
-def check_replaced(before: EditorScreen, body: list[str], screen: str) -> EditorScreen:
+def check_replaced(before: EditorScreen, body: list[str], screen: str, check_cursor: bool = True) -> EditorScreen:
     after = parse_editor(screen)
     want = expected_rows(before, body)
     got = after.lines[:len(want)]
@@ -144,13 +146,35 @@ def check_replaced(before: EditorScreen, body: list[str], screen: str) -> Editor
         diff = [f"row {i + 1}: want {w!r} got {g!r}"
                 for i, (w, g) in enumerate(zip(want, got + [None] * len(want))) if w != g]
         raise EditError("editor does not show the expected text: " + "; ".join(diff[:5]))
-    if after.cursor != (HEADER_ROWS + len(body) + 2, 1):
+    if check_cursor and after.cursor != (HEADER_ROWS + len(body) + 2, 1):
         raise EditError(f"cursor at {after.cursor}, expected the start of the '--' row")
     return after
 
 
+def last_row(screen: str) -> str:
+    rows = _rows(screen)
+    return rows[-1] if rows else ""
+
+
+def menu_field(screen: str) -> str | None:
+    """Text typed in the 確定要儲存檔案嗎？ field, or None if that field is not the focused (last) row.
+    (The menu rows stay on screen under the title prompt, so the prompt anywhere is not enough.)"""
+    row = last_row(screen)
+    if not row.startswith(MENU_PROMPT):
+        return None
+    return row[len(MENU_PROMPT):].strip()
+
+
+def title_field(screen: str) -> str | None:
+    row = last_row(screen)
+    return row[len(NEW_TITLE):] if row.startswith(NEW_TITLE) else None
+
+
 class EditDriver:
-    """Talks to a logged-in PyPtt.API through its low-level connect_core."""
+    """Talks to a logged-in PyPtt.API through its low-level connect_core.
+
+    The file menu answer is a line-input field and PTT treats an unrecognised answer as (S)儲存, so
+    Enter is only ever sent to it after the field was seen to hold exactly the intended letter."""
 
     def __init__(self, api):
         import PyPtt
@@ -189,15 +213,44 @@ class EditDriver:
         self._log_screen(why + " -> disconnecting without saving")
         self._util.close_session(self.api)
 
+    def _answer_menu(self, letter: str, targets: list) -> int:
+        """At the file menu field: clear it, type `letter`, and press Enter only if the field shows
+        exactly `letter`. Returns the index in `targets` after Enter; -2 if Enter was not sent."""
+        # Sent like PyPtt's own menu answers (Ctrl+L appended, which redraws so the field can be read).
+        self._send(CTRL_Y + letter, [MENU_PROMPT])
+        if menu_field(self.screen()) != letter:
+            return -2
+        return self._send(ENTER, targets)
+
+    def _to_menu(self) -> bool:
+        """From the editor: Ctrl+X until the (focused, empty or not) file menu field is shown."""
+        if menu_field(self.screen()) is not None:
+            return True
+        if EDITOR_STATUS not in last_row(self.screen()):
+            return False
+        self._send(CTRL_X, [MENU_PROMPT])
+        return menu_field(self.screen()) is not None
+
     def abandon(self, why: str, level: int = logging.ERROR) -> None:
-        """From the editor or its file menu: Ctrl+X, (A)放棄, back to the board list. Never saves."""
+        """From the editor, its file menu or the title prompt: back to the board list via (A)放棄.
+        Never saves: anything that is not a verified 'a' in the menu field ends in a disconnect."""
         self._log_screen(why + " -> abandoning the edit", level)
-        screen = self.screen()
-        if FILE_MENU not in screen and (EDITOR_STATUS not in screen or self._send(CTRL_X, [FILE_MENU]) != 0):
+        if title_field(self.screen()) is not None:
+            # Enter here only sets the pending title (applied on save, which we then abandon).
+            self._send(CTRL_Y, [NEW_TITLE])
+            if self._send(ENTER, [EDITOR_STATUS]) != 0:
+                self._disconnect("could not leave the title prompt")
+                return
+        if not self._to_menu():
             self._disconnect("file menu did not open")
             return
-        if self._send("a" + ENTER, [self._screens.Target.InBoard, ANY_KEY]) == 1:
-            self._send(" ", [self._screens.Target.InBoard])
+        in_board = self._screens.Target.InBoard
+        index = self._answer_menu("a", [in_board, ANY_KEY])
+        if index == -2:
+            self._disconnect("file menu field does not show 'a'")
+            return
+        if index == 1:
+            self._send(" ", [in_board])
         if not self._in_board_list():
             self._disconnect("not back on the board list after abandoning")
 
@@ -249,36 +302,42 @@ class EditDriver:
             self.abandon(str(e))
             raise
 
-    def open_file_menu(self) -> None:
-        if self._send(CTRL_X, [FILE_MENU]) != 0:
-            self.abandon("Ctrl+X did not show the file menu")
-            raise EditError("file menu did not open")
+    def _fail(self, why: str):
+        self.abandon(why)
+        raise EditError(why)
 
-    def change_title(self, title: str) -> None:
-        """At the file menu: (T)改標題. The prompt is verified before Enter; the new title only
-        takes effect on save, so a wrong prompt is abandoned with the rest of the edit."""
-        # Ctrl+Y clears a prefilled title in PTT's line editor; refresh=False so no Ctrl+L lands in it.
-        if self._send("t" + CTRL_Y + title, [title], refresh=False) != 0:
-            self._send(ENTER, [FILE_MENU, EDITOR_STATUS])  # leave whatever prompt took the keys
-            self.abandon("title prompt did not echo the new title")
-            raise EditError("title prompt not recognised")
-        line = next((r.rstrip() for r in reversed(self.screen().split("\n")) if r.rstrip().endswith(title)), "")
-        prompt = line[:len(line) - len(title)].strip()
-        if "標題" not in prompt or not prompt.endswith((":", "：")) or len(prompt) > 8:
-            self._send(ENTER, [FILE_MENU, EDITOR_STATUS])
-            self.abandon(f"unexpected title prompt {line!r}")
-            raise EditError("title prompt not recognised")
-        index = self._send(ENTER, [FILE_MENU, EDITOR_STATUS])
-        if index == 1:
-            self.open_file_menu()
-        elif index != 0:
-            self.abandon("no file menu / editor after the title prompt")
-            raise EditError("unknown screen after the title prompt")
+    def change_title(self, old: str, title: str, before: EditorScreen, body: list[str]) -> None:
+        """From the verified editor: Ctrl+X, 't' Enter, then the 舊標題/新標題 prompt (prefilled with the
+        old title): Ctrl+Y, type, Enter, back in the editor. Each step is checked before the next key."""
+        if not self._to_menu():
+            self._fail("Ctrl+X did not show the file menu")
+        if self._answer_menu("t", [NEW_TITLE]) != 0:
+            self._fail("no 新標題 prompt after (T)")
+        rows = _rows(self.screen())
+        if title_field(self.screen()) != old or len(rows) < 2 or rows[-2] != OLD_TITLE + old:
+            self._fail(f"title prompt does not show the old title {old!r}")
+        self._send(CTRL_Y, [NEW_TITLE])
+        if title_field(self.screen()) != "":
+            self._fail("Ctrl+Y did not clear the 新標題 field")
+        self._send(title, [NEW_TITLE + title])
+        if title_field(self.screen()) != title:
+            self._fail(f"新標題 field does not show {title!r}")
+        if self._send(ENTER, [EDITOR_STATUS]) != 0:
+            self._fail("not back in the editor after the title prompt")
+        # The header row keeps the old title until saved; the body must be untouched.
+        try:
+            self._redraw_editor(lambda s: check_replaced(before, body, s, check_cursor=False))
+        except EditError as e:
+            self._fail(str(e))
 
     def save(self) -> None:
-        """At the file menu: (S)儲存, then any 任意鍵 pages, until the board list is back."""
+        """From the verified editor: Ctrl+X, verified 's' Enter, any 任意鍵 pages, back to the board list."""
+        if not self._to_menu():
+            self._fail("Ctrl+X did not show the file menu")
         in_board = self._screens.Target.InBoard
-        index = self._send("s" + ENTER, [in_board, ANY_KEY], timeout=self.api.config.screen_post_timeout)
+        index = self._answer_menu("s", [in_board, ANY_KEY])
+        if index == -2:
+            self._fail("file menu field does not show 's'")
         for _ in range(3):
             if index != 1:
                 break
@@ -325,26 +384,29 @@ def _edit(driver: EditDriver, api, board: str, aid: str, body: list[str] | None,
     if not save:
         driver.abandon("rehearsal (no --post), verified OK", logging.INFO)
         return shown
-    driver.open_file_menu()
-    if title is not None and title.strip() != (post.get(driver.PyPtt.PostField.title) or "").strip():
-        driver.change_title(title)
+    old_title = (post.get(driver.PyPtt.PostField.title) or "").strip()
+    if title is not None and title.strip() != old_title:
+        driver.change_title(old_title, title.strip(), before, body)
     driver.save()
     log.info("PTT edit: saved #%s on %s", aid, board)
-    _check_saved(api, board, aid, body)
+    _check_saved(api, board, aid, body, title.strip() if title is not None else None)
     return shown
 
 
 _COLOR = re.compile(r"\x15\[[0-9;]*m")
 
 
-def _check_saved(api, board: str, aid: str, body: list[str]) -> None:
+def _check_saved(api, board: str, aid: str, body: list[str], title: str | None = None) -> None:
     """Read the post back; the save already happened, so a mismatch is only reported."""
     import PyPtt
     try:
-        text = api.get_post(board, aid=aid).get(PyPtt.PostField.content) or ""
+        post = api.get_post(board, aid=aid)
     except Exception:
         log.warning("PTT edit: could not read #%s back", aid, exc_info=True)
         return
+    text = post.get(PyPtt.PostField.content) or ""
+    if title is not None and (post.get(PyPtt.PostField.title) or "").strip() != title:
+        log.warning("PTT edit: saved #%s but its title is %r, not %r", aid, post.get(PyPtt.PostField.title), title)
     missing = [line for line in (_COLOR.sub("", b).strip() for b in body) if line and line not in text]
     if missing:
         log.warning("PTT edit: saved #%s but these lines are not in the post: %r", aid, missing)

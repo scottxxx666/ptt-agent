@@ -1,3 +1,4 @@
+import contextlib
 import logging
 
 import pytest
@@ -16,15 +17,17 @@ BOARD_LIST = ["【板主:x】  看板《Test》  [i]看板設定", "", "●  457
 
 
 class Term:
-    """Tiny model of PTT's board list, article editor, its file menu and the title prompt."""
+    """Model of PTT's board list, article editor, its file menu and the title prompt, as seen live:
+    the menu answer is a line-input field and any answer other than a/t/e saves."""
 
-    def __init__(self, file=None, rows=24, prefill_title=False, after_save=None, drop_char=None):
+    def __init__(self, file=None, rows=24, title_clears=True, after_save=None, drop_char=None, menu_echo=None):
         self.file = list(file if file is not None else HEADER + BODY + FOOTER)
         self.saved = None
         self.saved_title = None
         self.title = "[測試] edit me"
-        self.rows, self.prefill_title, self.after_save, self.drop_char = rows, prefill_title, after_save, drop_char
-        self.state, self.queue, self.sent, self.closed = "board", [], [], False
+        self.rows, self.title_clears, self.after_save, self.drop_char = rows, title_clears, after_save, drop_char
+        self.menu_echo = menu_echo  # what the menu field shows instead of the typed text (a glitch)
+        self.state, self.queue, self.sent, self.closed, self.submitted = "board", [], [], False, []
 
     # --- input -----------------------------------------------------------------------------------
     def feed(self, keys: str) -> None:
@@ -65,24 +68,32 @@ class Term:
                 self.lines[self.row] = line[:self.col] + k + line[self.col:]
                 self.col += 1
         elif s == "menu":
-            if k == "\r":
-                choice, self.menu_buf = self.menu_buf, ""
+            if k == "\x19":
+                self.menu_buf = ""
+            elif k == "\r":
+                choice = self.menu_buf
+                self.submitted.append(choice)
                 if choice == "a":
                     self.state = "board"
-                elif choice == "s":
+                elif choice == "t":
+                    self.state, self.title_buf = "title", self.title
+                elif choice == "e":
+                    self.state = "editor"
+                else:  # PTT: (S) and anything unrecognised save
                     self.saved, self.saved_title = list(self.lines), self.new_title
                     self.title = self.new_title
+                    i = max(i for i, r in enumerate(self.saved) if r.startswith("※"))
+                    self.saved.insert(i + 1, "※ 編輯: me (1.2.3.4 美國), 11/26/2026 00:22:36")
+                    self.file = self.saved
                     self.state = self.after_save or "board"
-            elif k == "t":
-                self.state, self.title_buf = "title", (self.title if self.prefill_title else "")
             else:
-                self.menu_buf = k
+                self.menu_buf += k
         elif s == "title":
             if k == "\x19":
-                if not self.prefill_title:
+                if self.title_clears:
                     self.title_buf = ""
             elif k == "\r":
-                self.new_title, self.state = self.title_buf, "menu"
+                self.new_title, self.state, self.row, self.col = self.title_buf, "editor", 0, 0
             else:
                 self.title_buf += k
         elif s == "anykey":
@@ -102,9 +113,12 @@ class Term:
         if self.state == "editor":
             status = f" 編輯文章  (^X)存檔 (^C)色碼   ║插入│aipr║{self.row + 1:3d}:{self.col + 1:3d}"
             return "\n".join(shown + [status])
+        menu = ["【檔案處理】", "[S/V]儲存 (U)上傳資料 (T)改標題 (A)放棄 (E)繼續 (R/W/D)讀寫刪暫存檔"]
         if self.state == "menu":
-            return "\n".join(shown[:-3] + ["【檔案處理】", "[S/V]儲存 (T)改標題 (A)放棄 (E)繼續", "確定要儲存檔案嗎？ "])
-        return "\n".join(shown[:-1] + ["新標題：" + self.title_buf])
+            field = self.menu_echo if self.menu_echo is not None else self.menu_buf
+            return "\n".join(shown[:-3] + menu + ["確定要儲存檔案嗎？ " + field])
+        return "\n".join(shown[:-5] + menu + ["確定要儲存檔案嗎？ t", "舊標題：" + self.title,
+                                              "新標題：" + self.title_buf])
 
 
 class Core:
@@ -196,7 +210,7 @@ def test_dump_opens_the_editor_and_abandons(caplog):
     shown = edit_post(Api(term), "Test", "#1h1mXoQL", None)
     assert shown.startswith("作者: me") and "--" in shown.split("\n")
     assert term.saved is None and term.state == "board" and not term.closed
-    assert term.sent[-1] == "a\r"
+    assert term.submitted == ["a"]
 
 
 def test_rehearsal_types_and_verifies_then_abandons():
@@ -210,7 +224,9 @@ def test_save_replaces_only_the_body():
     term = Term()
     api = Api(term)
     edit_post(api, "Test", "1h1mXoQL", NEW, save=True)
-    assert term.saved == HEADER + [r.replace("*", ESC) for r in NEW_ROWS] + [""] + FOOTER
+    assert term.saved == (HEADER + [r.replace("*", ESC) for r in NEW_ROWS] + [""] + FOOTER[:3]
+                          + ["※ 編輯: me (1.2.3.4 美國), 11/26/2026 00:22:36", ""])
+    assert term.submitted == ["s"]
     assert term.state == "board" and not term.closed
     assert api.calls[-1][:3] == ("get_post", "Test", "1h1mXoQL")  # read back
 
@@ -225,13 +241,14 @@ def test_save_with_new_title():
     term = Term()
     edit_post(Api(term), "Test", "1h1mXoQL", "x", title="[測試] new title", save=True)
     assert term.saved_title == "[測試] new title" and term.saved[:4] == HEADER
+    assert term.submitted == ["t", "s"]
 
 
 def test_title_prompt_not_cleared_abandons_without_saving():
-    term = Term(prefill_title=True)
-    with pytest.raises(EditError, match="title"):
+    term = Term(title_clears=False)
+    with pytest.raises(EditError, match="新標題"):
         edit_post(Api(term), "Test", "1h1mXoQL", "x", title="[測試] new title", save=True)
-    assert term.saved is None
+    assert term.saved is None and term.submitted == ["t", "a"] and term.state == "board"
 
 
 def test_mistyped_body_is_abandoned_not_saved(caplog):
@@ -248,14 +265,14 @@ def test_body_longer_than_one_screen_is_refused_before_typing():
     with pytest.raises(EditError, match="first screen"):
         edit_post(Api(term), "Test", "1h1mXoQL", "x", save=True)
     assert term.saved is None and term.state == "board"
-    assert not any("\x19" in k for k in term.sent)
+    assert not any("\x1bOB" in k for k in term.sent)
 
 
 def test_new_body_too_long_for_one_screen_is_refused_before_typing():
     term = Term()
     with pytest.raises(EditError, match="fit"):
         edit_post(Api(term), "Test", "1h1mXoQL", "\n".join(["x"] * 20), save=True)
-    assert term.saved is None and not any("\x19" in k for k in term.sent)
+    assert term.saved is None and not any("\x1bOB" in k for k in term.sent)
 
 
 def test_someone_elses_post_is_refused_before_any_key():
@@ -303,3 +320,45 @@ def test_unexpected_error_in_the_editor_disconnects_instead_of_logging_out_into_
     with pytest.raises(TimeoutError):
         edit_post(Api(term), "Test", "1h1mXoQL", "x", save=True)
     assert term.closed and term.saved is None
+
+
+def test_menu_field_not_showing_the_letter_is_never_submitted():
+    # PTT saves on an unrecognised answer, so a field that does not show exactly "s"/"a" gets no Enter.
+    for save in (True, False):
+        term = Term(menu_echo="?")
+        with pytest.raises(EditError) if save else contextlib.nullcontext():
+            edit_post(Api(term), "Test", "1h1mXoQL", "x", save=save)
+        assert term.submitted == [] and term.saved is None and term.closed
+
+
+def test_title_flow_failing_at_the_menu_is_not_submitted():
+    term = Term(menu_echo="?")
+    with pytest.raises(EditError):
+        edit_post(Api(term), "Test", "1h1mXoQL", "x", title="[測試] new", save=True)
+    assert term.submitted == [] and term.saved is None
+
+
+def test_editing_again_keeps_earlier_edit_lines_and_adds_one():
+    term = Term()
+    edit_post(Api(term), "Test", "1h1mXoQL", "first", save=True)
+    edit_post(Api(term), "Test", "1h1mXoQL", "second", save=True)
+    assert term.saved[4:6] == ["second", ""]
+    assert [r for r in term.saved if r.startswith("※ 編輯:")] == ["※ 編輯: me (1.2.3.4 美國), 11/26/2026 00:22:36"] * 2
+    assert term.saved[6:9] == FOOTER[:3]
+
+
+def test_title_read_back_mismatch_is_reported(caplog, monkeypatch):
+    term = Term()
+    api = Api(term)
+    monkeypatch.setattr(term, "title", "[測試] edit me")
+    real = api.get_post
+
+    def stale_title(board, aid=None, query=False):
+        post = real(board, aid=aid, query=query)
+        if not query:
+            post[api.post_fields.title] = "[測試] edit me"
+        return post
+    api.get_post = stale_title
+    with caplog.at_level(logging.WARNING, logger="ptt_agent"):
+        edit_post(api, "Test", "1h1mXoQL", "x", title="[測試] new", save=True)
+    assert term.saved_title == "[測試] new" and "its title is" in caplog.text

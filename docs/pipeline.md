@@ -13,13 +13,15 @@
 
 ## Editing a post (`--edit`, `ptt_edit.py`)
 PyPtt has no edit API, so `ptt_edit` drives the editor through `api.connect_core.send`: `#AID` Enter, `E`, cursor down 4 rows to the body, Ctrl+Y per old body row, type the new body + a blank line above `--`, Ctrl+X, (T)改標題 if asked, `s` Enter.
-- Body region = rows between the blank row after 作者/標題/時間 and the `--` row followed by `※ 發信站:`. Header and footer are never touched.
-- Only posts whose header..`※ 發信站` fit on the first editor screen (and whose new body still fits) are supported; others are refused before any text-changing key.
+- Body region = rows between the blank row after 作者/標題/時間 and the `--` row followed by `※ 發信站:`. Header and footer (incl. the `※ 編輯:` rows PTT appends after `※ 文章網址` on every save) are never touched.
+- Only posts whose header..footer fit on the first editor screen (and whose new body still fits) are supported; others are refused before any text-changing key.
 - Nothing is saved unless the redrawn editor equals exactly header + new body (ESC drawn as `*`) + blank + old footer, with the cursor at the start of `--`. Otherwise Ctrl+X, `a` Enter (abandon) and the screen is logged; a screen we cannot place -> disconnect (never saves).
+- The Ctrl+X answer `確定要儲存檔案嗎？` is a line-input field and PTT treats an unrecognised answer as SAVE. So every answer is Ctrl+Y (clear) + one letter, and Enter is sent only when the field (the last screen row) shows exactly that letter; otherwise disconnect.
+- Title (live recon): Ctrl+X, `t` Enter shows `舊標題：<old>` / `新標題：<old>` (prefilled). Ctrl+Y clears it, type, Enter goes back to the editor, whose header row still shows the old title. Then Ctrl+X `s` Enter. Each field is checked before the next key; the title is read back with `get_post` after saving (mismatch = warning).
 - Refuses posts not by `PTT_ID`, and editor headers whose author/board/title do not match the post.
 - Content: printable Big5 text, `\n`, and Ctrl+U (`\x15`) for color codes; any other control char is refused. Lines wider than the screen will fail verification (abandoned).
 - Board comes from `--board` (default `Test`), never from `PTT_BOARD`.
-- Not yet verified live: the screens after `s` Enter, the (T)改標題 prompt (assumed: Ctrl+Y clears it; the prompt is checked before Enter), and whether PTT appends `※ 編輯:`.
+- www.ptt.cc caches articles for a while after an edit; check with `--edit AID` (dump) instead.
 
 ```
 uv run python -m ptt_agent --edit 1h1mXoQL                                   # print the editor screen, abandon
