@@ -52,7 +52,12 @@ class SearchApi(FakeApi):
     def get_post(self, **kw):
         import PyPtt
         self.calls.append(("get_post", kw))
-        return {PyPtt.PostField.title: self.titles[kw["index"] - 1]}
+        if "index" not in kw:  # by aid, full post
+            return {PyPtt.PostField.content: self.bodies.get(kw["aid"])}
+        i = kw["index"]
+        return {PyPtt.PostField.title: self.titles[i - 1], PyPtt.PostField.aid: f"aid{i}"}
+
+    bodies: dict = {}
 
 
 def poster(api):
@@ -78,6 +83,23 @@ def test_has_recent_post_matches_key_inside_title():
     p = poster(SearchApi(["[影音] 261102 手動發的"]))
     assert p.has_recent_post("261102") is True
     assert poster(SearchApi(["[影音] 261102 手動發的"])).has_recent_post("261103") is False
+
+
+def test_has_recent_post_with_needle_checks_body_of_title_matches_only():
+    api = SearchApi(["[影音] 261102 手動發的", "261102 weverse live", "[影音] 261101 x"])
+    api.bodies = {"aid1": "https://youtu.be/HAND\n", "aid2": "live\nhttps://weverse.io/...\n"}
+    p = poster(api)
+    assert p.has_recent_post("261102", needle="HAND") is True
+    assert p.has_recent_post("261102", needle="OTHER") is False  # same day, different video
+    assert p.has_recent_post("261103", needle="HAND") is False
+    by_aid = [c[1]["aid"] for c in api.calls if c[0] == "get_post" and "aid" in c[1]]
+    assert sorted(by_aid) == ["aid1", "aid2"]  # bodies fetched once, only for title matches
+    assert [c[0] for c in api.calls].count("login") == 2
+
+
+def test_has_recent_post_with_needle_treats_missing_body_as_no_match():
+    api = SearchApi(["261102 a"])  # deleted post: content None
+    assert poster(api).has_recent_post("261102", needle="X") is False
 
 
 def test_logout_failure_after_successful_post_does_not_fail_the_post():
