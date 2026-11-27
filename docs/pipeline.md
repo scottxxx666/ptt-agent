@@ -1,6 +1,6 @@
 # Pipeline details
 
-- Feed: playlist `UULF…` RSS = long-form only (Shorts excluded). No API key.
+- Feed: playlist `UULF…` RSS = long-form only (Shorts excluded). No API key needed. The RSS endpoint sometimes returns 503 (seen 2026-11-27); if the fetch raises `OSError` and `YOUTUBE_API_KEY` is set, `fetch_videos` falls back to the Data API v3 `playlistItems.list` on the same playlist (1 quota unit per call, key sent in the `X-Goog-Api-Key` header; `publishedAt` is `contentDetails.videoPublishedAt`). Without the key the RSS error propagates as before. The API path was checked against the real API on 2026-11-27 (`UULF…` works with `playlistItems.list`).
 - Translator: runs `agy -p "/ls <title>" --output-format json` with cwd = project root, because the skill is `.agents/skills/le-sserafim-translator/SKILL.md`. Output is double JSON: agy envelope → `response` string → `{"title_zh", "title_original"}`. Changing the skill's output format breaks `translator.py`.
 - State: `state.json` (seen video ids). A missing file means first run: seed everything as seen, post nothing. A video is marked seen only after it was posted.
 - PyPtt needs Python >= 3.11 and a non-cloud IP (PTT blocks cloud IPs). Locally this is automatic; on a cloud VM set `PTT_PROXY=socks5h://127.0.0.1:40000` (WARP proxy mode). `PttPoster(proxy=...)` sets `WSS_PROXY` only while PyPtt logs in/posts/logs out: `websockets` reads it first for wss://, while urllib (YouTube, Telegram) and `agy` ignore it. Needs `python-socks`.
