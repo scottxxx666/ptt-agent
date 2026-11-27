@@ -68,7 +68,7 @@ def test_parse_api_items_empty_and_blank_title():
         parse_api_items(bad)
 
 
-def _fake_urlopen(feed_error):
+def _fake_urlopen(api_error=None, feed_error=None):
     calls = []
 
     def urlopen(target, timeout):
@@ -77,35 +77,47 @@ def _fake_urlopen(feed_error):
             if feed_error:
                 raise feed_error
             return io.BytesIO(FEED.encode())
+        if api_error:
+            raise api_error
         return io.BytesIO(json.dumps(API_PAYLOAD).encode())
     return urlopen, calls
 
 
-def _http_503():
-    return urllib.error.HTTPError(FEED_URL, 503, "Service Unavailable", {}, None)
+def _http_error(code):
+    return urllib.error.HTTPError("https://example.test", code, "err", {}, None)
 
 
-def test_fetch_falls_back_to_api_when_rss_fails(monkeypatch):
-    urlopen, calls = _fake_urlopen(_http_503())
+def test_fetch_uses_api_first_when_key_set(monkeypatch):
+    urlopen, calls = _fake_urlopen()
     monkeypatch.setattr(youtube.urllib.request, "urlopen", urlopen)
     monkeypatch.setenv("YOUTUBE_API_KEY", "k")
     assert [v.id for v in youtube.fetch_videos()] == ["aaa", "bbb"]
-    req = calls[1]
+    assert len(calls) == 1
+    req = calls[0]
     assert req.get_header("X-goog-api-key") == "k"
     assert "playlistId=UULFs-QBT4qkj_YiQw1ZntDO3g" in req.full_url and "key=" not in req.full_url
 
 
-def test_fetch_reraises_without_api_key(monkeypatch):
-    urlopen, _ = _fake_urlopen(_http_503())
-    monkeypatch.setattr(youtube.urllib.request, "urlopen", urlopen)
-    monkeypatch.delenv("YOUTUBE_API_KEY", raising=False)
-    with pytest.raises(urllib.error.HTTPError):
-        youtube.fetch_videos()
-
-
-def test_fetch_skips_api_when_rss_works(monkeypatch):
-    urlopen, calls = _fake_urlopen(None)
+@pytest.mark.parametrize("code", [400, 403, 503])
+def test_fetch_falls_back_to_rss_when_api_fails(monkeypatch, code):
+    urlopen, calls = _fake_urlopen(api_error=_http_error(code))
     monkeypatch.setattr(youtube.urllib.request, "urlopen", urlopen)
     monkeypatch.setenv("YOUTUBE_API_KEY", "k")
     assert [v.id for v in youtube.fetch_videos()] == ["nbQ70Pk5_eg", "TSrGHn4M9yE"]
-    assert len(calls) == 1
+    assert len(calls) == 2
+
+
+def test_fetch_uses_rss_only_without_api_key(monkeypatch):
+    urlopen, calls = _fake_urlopen()
+    monkeypatch.setattr(youtube.urllib.request, "urlopen", urlopen)
+    monkeypatch.delenv("YOUTUBE_API_KEY", raising=False)
+    assert [v.id for v in youtube.fetch_videos()] == ["nbQ70Pk5_eg", "TSrGHn4M9yE"]
+    assert calls == [FEED_URL]
+
+
+def test_fetch_raises_when_both_sources_fail(monkeypatch):
+    urlopen, _ = _fake_urlopen(api_error=_http_error(403), feed_error=_http_error(503))
+    monkeypatch.setattr(youtube.urllib.request, "urlopen", urlopen)
+    monkeypatch.setenv("YOUTUBE_API_KEY", "k")
+    with pytest.raises(urllib.error.HTTPError, match="503"):
+        youtube.fetch_videos()

@@ -67,13 +67,17 @@ def fetch_videos_api(api_key: str, timeout: float = 20) -> list[Video]:
         return parse_api_items(json.load(resp))
 
 
+def fetch_videos_rss(url: str = FEED_URL, timeout: float = 20) -> list[Video]:
+    with urllib.request.urlopen(url, timeout=timeout) as resp:
+        return parse_feed(resp.read().decode("utf-8"))
+
+
 def fetch_videos(url: str = FEED_URL, timeout: float = 20) -> list[Video]:
+    api_key = os.environ.get("YOUTUBE_API_KEY")
+    if not api_key:
+        return fetch_videos_rss(url, timeout)
     try:
-        with urllib.request.urlopen(url, timeout=timeout) as resp:
-            return parse_feed(resp.read().decode("utf-8"))
-    except OSError:
-        # RSS 503s intermittently; HTTPError/URLError/timeouts are all OSError.
-        api_key = os.environ.get("YOUTUBE_API_KEY")
-        if not api_key:
-            raise
         return fetch_videos_api(api_key, timeout)
+    except OSError:
+        # API errors (quota 403, revoked key 400, network) are all OSError; RSS is the zero-config backup.
+        return fetch_videos_rss(url, timeout)
