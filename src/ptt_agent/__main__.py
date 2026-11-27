@@ -48,7 +48,7 @@ def main() -> None:
                       find_post=poster.find_post_aid if poster else None,
                       state_path=state_path, do_post=args.post, notify=notify if args.post else None)
         else:
-            already_posted = (lambda item: poster.has_recent_post(youtube_dup_key(item))) if poster else None
+            already_posted = (lambda item: poster.has_recent_post(youtube_dup_key(item), needle=item.id)) if poster else None
             run(fetch=fetch_videos, translate=translate_title, post=post, already_posted=already_posted,
                 state_path=state_path, do_post=args.post, notify=notify if args.post else None)
     except Exception as e:

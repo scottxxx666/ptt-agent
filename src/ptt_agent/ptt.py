@@ -13,7 +13,8 @@ class PttPoster:
         self._proxy = proxy
         self._board, self._title_index = board, title_index
         self._api_factory = api_factory
-        self._recent: dict[int, list[str]] = {}
+        self._recent: dict[int, list[tuple[str, str]]] = {}
+        self._bodies: dict[str, str] = {}  # aid -> body; a post's body does not change under us
 
     @contextlib.contextmanager
     def _proxied(self):
@@ -54,13 +55,24 @@ class PttPoster:
         except Exception:
             log.warning("PTT logout failed", exc_info=True)
 
-    def has_recent_post(self, key: str, limit: int = RECENT_LIMIT) -> bool:
-        """True if one of this account's last `limit` posts on the board has `key` in its title."""
+    def has_recent_post(self, key: str, needle: str | None = None, limit: int = RECENT_LIMIT) -> bool:
+        """True if one of this account's last `limit` posts on the board has `key` in its title and,
+        if `needle` is given, `needle` in its body (so a same-day post of something else does not count)."""
         if limit not in self._recent:  # one login per run, not per item; post() invalidates it
-            self._recent[limit] = self.recent_titles(limit)
-        return any(key in t for t in self._recent[limit])
+            self._recent[limit] = self._recent_posts(limit)
+        aids = [aid for title, aid in self._recent[limit] if key in title]
+        if needle is None or not aids:
+            return bool(aids)
+        missing = [aid for aid in aids if aid not in self._bodies]
+        if missing:
+            self._bodies.update(self._fetch_bodies(missing))
+        return any(needle in self._bodies[aid] for aid in aids)
 
     def recent_titles(self, limit: int = RECENT_LIMIT) -> list[str]:
+        return [title for title, _ in self._recent_posts(limit)]
+
+    def _recent_posts(self, limit: int) -> list[tuple[str, str]]:
+        """(title, aid) of this account's last `limit` posts on the board, newest first."""
         import PyPtt
         with self._proxied():
             api = self._api_factory() if self._api_factory else self._default_api()
@@ -71,8 +83,20 @@ class PttPoster:
                     newest = api.get_newest_index(PyPtt.NewIndex.BOARD, board=self._board, **search)
                 except PyPtt.NoSearchResult:
                     return []
-                return [api.get_post(board=self._board, index=i, query=True, **search)[PyPtt.PostField.title]
-                        for i in range(newest, max(newest - limit, 0), -1)]
+                posts = [api.get_post(board=self._board, index=i, query=True, **search)
+                         for i in range(newest, max(newest - limit, 0), -1)]
+                return [(p[PyPtt.PostField.title], p.get(PyPtt.PostField.aid)) for p in posts]
+            finally:
+                self._logout(api)
+
+    def _fetch_bodies(self, aids: list[str]) -> dict[str, str]:
+        import PyPtt
+        with self._proxied():
+            api = self._api_factory() if self._api_factory else self._default_api()
+            api.login(ptt_id=self._id, ptt_pw=self._pw)
+            try:
+                return {aid: api.get_post(board=self._board, aid=aid).get(PyPtt.PostField.content) or ""
+                        for aid in aids}
             finally:
                 self._logout(api)
 
