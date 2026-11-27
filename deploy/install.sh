@@ -51,7 +51,7 @@ systemctl daemon-reload
 
 if [ ! -e /etc/ptt-agent.env ]; then
   install -m 0600 -o root -g root "$APP_DIR/deploy/ptt-agent.env.example" /etc/ptt-agent.env
-  log "created /etc/ptt-agent.env: fill in PTT_ID, PTT_PW, TELEGRAM_*"
+  log "created /etc/ptt-agent.env: fill in PTT_ID, PTT_PW, TELEGRAM_* (optional: YOUTUBE_API_KEY)"
 fi
 
 cat <<NEXT

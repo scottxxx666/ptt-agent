@@ -66,7 +66,7 @@ uv run python -m ptt_agent --edit <AID> [--board Test] --content-file body.txt [
 uv run python -m ptt_agent --edit <AID> --append [--content-file add.txt] [--post]   # 加在 -- 上方，不限長度
 ```
 
-帳密放在 `.env`（參考 `.env.example`）：`PTT_ID`、`PTT_PW`。
+帳密放在 `.env`（參考 `.env.example`）：`PTT_ID`、`PTT_PW`；選填 `YOUTUBE_API_KEY`（YouTube Data API v3，沒設或失敗時改用 RSS）。
 
 更多實作細節與限制見 `CLAUDE.md`。
 
@@ -82,7 +82,7 @@ uv run python -m ptt_agent --edit <AID> --append [--content-file add.txt] [--pos
 # 一個指令，可重複執行：uv、ptt-agent user、clone/更新、依賴、agy、systemd unit、/etc/ptt-agent.env 範本。
 # 不會寫 secrets、不會登入 agy、不會啟用 timer。（repo 是 public 才能這樣 curl）
 curl -fsSL https://raw.githubusercontent.com/scottxxx666/ptt-agent/main/deploy/install.sh | sudo bash
-sudoedit /etc/ptt-agent.env      # 填 PTT_ID PTT_PW TELEGRAM_*
+sudoedit /etc/ptt-agent.env      # 填 PTT_ID PTT_PW TELEGRAM_*，選填 YOUTUBE_API_KEY
 ```
 
 Weverse 要另外放 token。refresh token 會輪替，所以 **VM 要用自己獨立的一份**，不能從 Mac 的 `.weverse-token.json` 複製（兩邊共用會互相讓對方失效）：在無痕視窗登入 weverse.io，複製那個 session 的 `we2_refresh_token`，在 VM 貼進下面的指令後按 Enter、Ctrl-D（值不會進 history）：
@@ -146,7 +146,7 @@ free -m
 2. **裝 ptt-agent，不啟用 timer：**
    ```bash
    curl -fsSL https://raw.githubusercontent.com/scottxxx666/ptt-agent/main/deploy/install.sh | sudo bash
-   sudoedit /etc/ptt-agent.env      # 填 PTT_ID PTT_PW TELEGRAM_*
+   sudoedit /etc/ptt-agent.env      # 填 PTT_ID PTT_PW TELEGRAM_*，選填 YOUTUBE_API_KEY
    ```
 3. **在新 VM 重新登入 agy**（keyring 是各 VM 自己的，token 不會跟著搬）：上面的測試 a，再用 b 確認登入留得住。
 4. **確認 PTT 經 WARP 能登入**（只登入、搜尋、登出，不發文）：
